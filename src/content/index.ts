@@ -1,22 +1,52 @@
-type FillMethod = 'execCommand'
+import type {
+  BackgroundToHostMessage,
+  BackgroundToRoleMessage,
+  HostToBackgroundMessage,
+  RoleToBackgroundMessage,
+  TeamMessage,
+  TeamRole,
+  TeamRoomState,
+} from '../team/types'
+import { isClickableButton, readEditorText, setContentEditableText } from './geminiInput'
+import { createReplyTracker } from './replyTracker'
+import { createReplyTimeout } from './replyTimeout'
+import { waitBeforePromptInput, PROMPT_INPUT_DELAY_MS } from './promptDelay'
+import { keepDeepestResponseContainers } from './responseContainers'
 
 interface SiteConfig {
   editor: string
   sendButton: string
-  fillMethod: FillMethod
   responseSelector: string
 }
 
-interface TeamSendPromptMessage {
-  type: 'TEAM_SEND_PROMPT'
-  messageId?: string
-  content: string
-  autoSend?: boolean
+type ContentRuntimeMessage =
+  | BackgroundToHostMessage
+  | BackgroundToRoleMessage
+  | { type: 'TEAM_STATE_UPDATED'; state: TeamRoomState }
+
+interface AssignedRole {
+  roleId: string
+  roleName: string
+  roomId: string
 }
 
 const OPEN_TEAM_LOADED_KEY = '__OPENTEAM_LOADED__'
+const PANEL_ID = '__openteam_team_panel__'
 const RESPONSE_DEBOUNCE_MS = 800
 const RESPONSE_MAX_WAIT_MS = 3000
+const INPUT_TIMEOUT_MS = 9000
+const REPLY_TIMEOUT_MS = 120000
+const log = {
+  debug(event: string, details?: Record<string, unknown>): void {
+    console.debug('[OpenTeam][content]', event, details || {})
+  },
+  info(event: string, details?: Record<string, unknown>): void {
+    console.info('[OpenTeam][content]', event, details || {})
+  },
+  warn(event: string, details?: Record<string, unknown>): void {
+    console.warn('[OpenTeam][content]', event, details || {})
+  },
+}
 
 const BLOCK_TAGS = new Set([
   'P',
@@ -43,11 +73,25 @@ const SKIP_TAGS = new Set([
   'MAT-EXPANSION-PANEL-HEADER',
 ])
 
+let assignedRole: AssignedRole | null = null
+let activeMessageId: string | undefined
+let currentState: TeamRoomState | null = null
+const replyTracker = createReplyTracker()
+let panelApi: ReturnType<typeof createTeamPanel> | null = null
+const replyTimeout = createReplyTimeout(REPLY_TIMEOUT_MS, messageId => {
+  log.warn('reply-timeout', { messageId, roleId: assignedRole?.roleId, roleName: assignedRole?.roleName })
+  if (activeMessageId === messageId) activeMessageId = undefined
+  sendRuntimeMessage({
+    type: 'TEAM_ROLE_STATUS',
+    status: 'error',
+    error: `等待 Gemini 回复超时（${Math.round(REPLY_TIMEOUT_MS / 1000)} 秒）`,
+  }).catch(error => log.warn('reply-timeout:status-failed', { error: error instanceof Error ? error.message : String(error) }))
+})
+
 function getSiteConfig(): SiteConfig {
   return {
-    editor: 'div.ql-editor[contenteditable="true"]',
-    sendButton: 'button.send-button[aria-label*="发送"], button.send-button[aria-label*="Send"]',
-    fillMethod: 'execCommand',
+    editor: 'div.ql-editor[contenteditable="true"], rich-textarea div[contenteditable="true"]',
+    sendButton: 'button.send-button[aria-label*="发送"], button.send-button[aria-label*="Send"], button[aria-label*="Send message"], button[aria-label*="发送消息"]',
     responseSelector: 'model-response, .model-response-text, message-content',
   }
 }
@@ -57,14 +101,6 @@ function getConversationId(): string {
   return match ? match[1] : '__default__'
 }
 
-function hashStr(value: string): number {
-  let hash = 0
-  for (let index = 0; index < value.length; index += 1) {
-    hash = (Math.imul(31, hash) + value.charCodeAt(index)) | 0
-  }
-  return hash >>> 0
-}
-
 function querySelectorFirst(selectors: string): HTMLElement | null {
   for (const selector of selectors.split(',').map(item => item.trim())) {
     const element = document.querySelector(selector) as HTMLElement | null
@@ -72,6 +108,59 @@ function querySelectorFirst(selectors: string): HTMLElement | null {
   }
 
   return null
+}
+
+function waitForElement(selectors: string, timeoutMs = INPUT_TIMEOUT_MS): Promise<HTMLElement> {
+  const immediate = querySelectorFirst(selectors)
+  if (immediate) {
+    log.debug('wait-element:immediate', { selectors, tagName: immediate.tagName })
+    return Promise.resolve(immediate)
+  }
+
+  return new Promise((resolve, reject) => {
+    const startedAt = Date.now()
+    const timer = window.setInterval(() => {
+      const element = querySelectorFirst(selectors)
+      if (element) {
+        window.clearInterval(timer)
+        log.debug('wait-element:found', { selectors, tagName: element.tagName, elapsedMs: Date.now() - startedAt })
+        resolve(element)
+        return
+      }
+
+      if (Date.now() - startedAt >= timeoutMs) {
+        window.clearInterval(timer)
+        log.warn('wait-element:timeout', { selectors, timeoutMs })
+        reject(new Error(`Element not found: ${selectors}`))
+      }
+    }, 250)
+  })
+}
+
+function waitForClickableButton(selectors: string, timeoutMs = INPUT_TIMEOUT_MS): Promise<HTMLElement> {
+  return new Promise((resolve, reject) => {
+    const startedAt = Date.now()
+    const timer = window.setInterval(() => {
+      const button = querySelectorFirst(selectors)
+      if (button && isClickableButton(button)) {
+        window.clearInterval(timer)
+        log.debug('wait-button:clickable', {
+          selectors,
+          tagName: button.tagName,
+          ariaDisabled: button.getAttribute('aria-disabled'),
+          elapsedMs: Date.now() - startedAt,
+        })
+        resolve(button)
+        return
+      }
+
+      if (Date.now() - startedAt >= timeoutMs) {
+        window.clearInterval(timer)
+        log.warn('wait-button:timeout', { selectors, timeoutMs, found: Boolean(button) })
+        reject(new Error('Gemini 发送按钮暂不可用，请稍后重试'))
+      }
+    }, 250)
+  })
 }
 
 function extractCleanText(node: Node): string {
@@ -116,6 +205,12 @@ function findResponseContainer(element: Element | null): Element | null {
   return null
 }
 
+function getAllAssistantReplies(): string[] {
+  return [...document.querySelectorAll(getSiteConfig().responseSelector)]
+    .map(container => extractCleanText(container))
+    .filter(Boolean)
+}
+
 function observeResponseContainers(onStableText: (text: string, element: Element) => void): void {
   let debounceTimer: ReturnType<typeof setTimeout> | null = null
   let maxWaitTimer: ReturnType<typeof setTimeout> | null = null
@@ -132,7 +227,9 @@ function observeResponseContainers(onStableText: (text: string, element: Element
       maxWaitTimer = null
     }
 
-    const containers = [...pendingContainers]
+    const pendingCount = pendingContainers.size
+    const containers = keepDeepestResponseContainers([...pendingContainers])
+    log.debug('observer:flush', { pending: pendingCount, kept: containers.length })
     pendingContainers.clear()
 
     requestAnimationFrame(() => {
@@ -189,33 +286,477 @@ function observeResponseContainers(onStableText: (text: string, element: Element
   })
 }
 
+async function sendRuntimeMessage<T>(message: HostToBackgroundMessage | RoleToBackgroundMessage): Promise<T> {
+  return new Promise((resolve, reject) => {
+    log.debug('runtime-send:start', { type: message.type })
+    chrome.runtime.sendMessage(message, response => {
+      const error = chrome.runtime.lastError
+      if (error) {
+        log.warn('runtime-send:failed', { type: message.type, error: error.message })
+        reject(new Error(error.message))
+        return
+      }
+
+      log.debug('runtime-send:response', { type: message.type, response })
+      resolve(response as T)
+    })
+  })
+}
+
 async function fillAndSend(content: string, autoSend = true): Promise<void> {
   const config = getSiteConfig()
-  const editor = querySelectorFirst(config.editor)
-  if (!editor) throw new Error('Gemini editor not found')
+  const editor = await waitForElement(config.editor)
 
-  editor.focus()
-
-  if (config.fillMethod === 'execCommand') {
-    document.execCommand('insertText', false, content)
+  log.info('fill-send:start', { contentLength: content.length, autoSend })
+  setContentEditableText(editor, content)
+  if (readEditorText(editor) !== content.trim()) {
+    log.warn('fill-send:editor-mismatch', { expectedLength: content.trim().length, actualLength: readEditorText(editor).length })
+    throw new Error('Gemini editor did not accept the prompt text')
   }
+  log.info('fill-send:editor-written', { contentLength: content.trim().length })
 
   if (!autoSend) return
 
-  const sendButton = querySelectorFirst(config.sendButton)
-  if (!sendButton) throw new Error('Gemini send button not found')
-
+  const sendButton = await waitForClickableButton(config.sendButton)
   sendButton.click()
+  log.info('fill-send:clicked', { buttonTag: sendButton.tagName })
+}
+
+function teamStatusLabel(role: TeamRole): string {
+  if (role.status === 'opening') return '打开中'
+  if (role.status === 'online') return '在线'
+  if (role.status === 'sending') return '发送中'
+  if (role.status === 'generating') return '生成中'
+  if (role.status === 'idle') return '空闲'
+  if (role.status === 'offline') return '离线'
+  return '异常'
+}
+
+function messageTitle(message: TeamMessage): string {
+  if (message.from === 'user') {
+    if (message.target === 'all') return '你 → all'
+    if (message.target === 'role') return `你 → ${message.targetRoleName || '角色'}`
+    return '你'
+  }
+
+  if (message.from === 'role') return message.roleName || '角色'
+  return '系统'
+}
+
+function createTeamPanel(initialState: TeamRoomState) {
+  const host = document.createElement('div')
+  host.id = PANEL_ID
+  const shadow = host.attachShadow({ mode: 'open' })
+  let expanded = true
+  currentState = initialState
+
+  shadow.innerHTML = `
+    <style>
+      :host {
+        color-scheme: light;
+        font-family: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      }
+
+      .launcher {
+        position: fixed;
+        right: 22px;
+        bottom: 22px;
+        z-index: 2147483647;
+        width: 52px;
+        height: 52px;
+        border: 0;
+        border-radius: 50%;
+        background: #101820;
+        color: #f7f1df;
+        box-shadow: 0 14px 34px rgba(16, 24, 32, 0.28);
+        font-size: 20px;
+        font-weight: 800;
+        cursor: pointer;
+      }
+
+      .panel {
+        position: fixed;
+        right: 22px;
+        bottom: 86px;
+        z-index: 2147483647;
+        width: min(390px, calc(100vw - 28px));
+        height: min(620px, calc(100vh - 112px));
+        display: grid;
+        grid-template-rows: auto auto 1fr auto;
+        overflow: hidden;
+        border: 1px solid rgba(16, 24, 32, 0.12);
+        border-radius: 8px;
+        background: #fffdf6;
+        box-shadow: 0 22px 70px rgba(16, 24, 32, 0.24);
+      }
+
+      .panel[hidden] {
+        display: none;
+      }
+
+      .top {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        padding: 14px 14px 12px;
+        border-bottom: 1px solid rgba(16, 24, 32, 0.1);
+        background: #f7f1df;
+      }
+
+      .title {
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+        min-width: 0;
+      }
+
+      .title strong {
+        color: #101820;
+        font-size: 14px;
+        line-height: 1.2;
+      }
+
+      .title span {
+        color: #59646e;
+        font-size: 12px;
+        line-height: 1.2;
+      }
+
+      .icon-button,
+      .add,
+      .send {
+        border: 1px solid rgba(16, 24, 32, 0.14);
+        border-radius: 8px;
+        background: #ffffff;
+        color: #101820;
+        cursor: pointer;
+        font: inherit;
+      }
+
+      .icon-button {
+        width: 30px;
+        height: 30px;
+        line-height: 28px;
+      }
+
+      .roles {
+        display: flex;
+        gap: 8px;
+        overflow-x: auto;
+        padding: 10px 12px;
+        border-bottom: 1px solid rgba(16, 24, 32, 0.08);
+      }
+
+      .role {
+        display: grid;
+        grid-template-columns: auto auto;
+        align-items: center;
+        gap: 3px 8px;
+        min-width: 118px;
+        padding: 8px;
+        border: 1px solid rgba(16, 24, 32, 0.1);
+        border-radius: 8px;
+        background: #ffffff;
+      }
+
+      .role-name {
+        overflow: hidden;
+        color: #101820;
+        font-size: 13px;
+        font-weight: 700;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .role-status {
+        color: #64707a;
+        font-size: 11px;
+      }
+
+      .role-remove {
+        grid-row: span 2;
+        width: 24px;
+        height: 24px;
+        border: 0;
+        border-radius: 6px;
+        background: #f1e7d0;
+        color: #6e1f18;
+        cursor: pointer;
+      }
+
+      .add {
+        min-width: 86px;
+        padding: 0 12px;
+        background: #101820;
+        color: #f7f1df;
+        font-size: 12px;
+        font-weight: 700;
+      }
+
+      .messages {
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+        overflow-y: auto;
+        padding: 14px 12px;
+        background: linear-gradient(180deg, #fffdf6, #f9fbff);
+      }
+
+      .empty {
+        margin: auto;
+        color: #73808b;
+        font-size: 13px;
+      }
+
+      .message {
+        max-width: 88%;
+        padding: 9px 10px;
+        border: 1px solid rgba(16, 24, 32, 0.1);
+        border-radius: 8px;
+        background: #ffffff;
+        color: #17222b;
+        white-space: pre-wrap;
+        word-break: break-word;
+      }
+
+      .message.user {
+        align-self: flex-end;
+        background: #e8f2ff;
+      }
+
+      .message.system {
+        align-self: center;
+        background: #fff0ec;
+        color: #7a261f;
+      }
+
+      .message-title {
+        margin-bottom: 4px;
+        color: #53606a;
+        font-size: 11px;
+        font-weight: 800;
+      }
+
+      .composer {
+        display: grid;
+        grid-template-columns: 1fr auto;
+        gap: 8px;
+        padding: 12px;
+        border-top: 1px solid rgba(16, 24, 32, 0.1);
+        background: #ffffff;
+      }
+
+      textarea {
+        min-height: 44px;
+        max-height: 110px;
+        resize: vertical;
+        border: 1px solid rgba(16, 24, 32, 0.16);
+        border-radius: 8px;
+        padding: 9px 10px;
+        color: #101820;
+        font: inherit;
+        font-size: 13px;
+        outline: none;
+      }
+
+      textarea:focus {
+        border-color: #2f6fed;
+        box-shadow: 0 0 0 3px rgba(47, 111, 237, 0.12);
+      }
+
+      .send {
+        width: 58px;
+        background: #2f6fed;
+        color: #ffffff;
+        font-size: 13px;
+        font-weight: 800;
+      }
+    </style>
+    <button class="launcher" title="OpenTeam">OT</button>
+    <section class="panel">
+      <div class="top">
+        <div class="title">
+          <strong>OpenTeam</strong>
+          <span class="summary"></span>
+        </div>
+        <button class="icon-button collapse" title="收起">×</button>
+      </div>
+      <div class="roles"></div>
+      <div class="messages"></div>
+      <form class="composer">
+        <textarea placeholder="@A 分析这个方案"></textarea>
+        <button class="send" type="submit">发送</button>
+      </form>
+    </section>
+  `
+
+  document.documentElement.append(host)
+
+  const launcher = shadow.querySelector<HTMLButtonElement>('.launcher')
+  const panel = shadow.querySelector<HTMLElement>('.panel')
+  const collapse = shadow.querySelector<HTMLButtonElement>('.collapse')
+  const rolesEl = shadow.querySelector<HTMLElement>('.roles')
+  const messagesEl = shadow.querySelector<HTMLElement>('.messages')
+  const summaryEl = shadow.querySelector<HTMLElement>('.summary')
+  const form = shadow.querySelector<HTMLFormElement>('.composer')
+  const textarea = shadow.querySelector<HTMLTextAreaElement>('textarea')
+
+  function setExpanded(next: boolean): void {
+    expanded = next
+    if (panel) panel.hidden = !expanded
+  }
+
+  function renderRoles(state: TeamRoomState): void {
+    if (!rolesEl) return
+
+    rolesEl.replaceChildren()
+    const add = document.createElement('button')
+    add.className = 'add'
+    add.type = 'button'
+    add.textContent = '+ 角色'
+    add.addEventListener('click', () => {
+      const name = window.prompt('角色名')
+      if (!name?.trim()) return
+      sendRuntimeMessage({ type: 'TEAM_CREATE_ROLE', name }).catch(error => console.warn('[OpenTeam] create role failed', error))
+    })
+    rolesEl.append(add)
+
+    for (const role of state.roles) {
+      const item = document.createElement('div')
+      item.className = 'role'
+      item.innerHTML = `
+        <div class="role-name"></div>
+        <button class="role-remove" title="移除">×</button>
+        <div class="role-status"></div>
+      `
+      item.querySelector('.role-name')!.textContent = role.name
+      item.querySelector('.role-status')!.textContent = role.lastError || teamStatusLabel(role)
+      item.querySelector<HTMLButtonElement>('.role-remove')!.addEventListener('click', () => {
+        sendRuntimeMessage({ type: 'TEAM_REMOVE_ROLE', roleId: role.id }).catch(error => console.warn('[OpenTeam] remove role failed', error))
+      })
+      rolesEl.append(item)
+    }
+  }
+
+  function renderMessages(state: TeamRoomState): void {
+    if (!messagesEl) return
+
+    messagesEl.replaceChildren()
+    if (state.messages.length === 0) {
+      const empty = document.createElement('div')
+      empty.className = 'empty'
+      empty.textContent = '还没有消息'
+      messagesEl.append(empty)
+      return
+    }
+
+    for (const message of state.messages) {
+      const item = document.createElement('div')
+      item.className = `message ${message.from}`
+      const title = document.createElement('div')
+      title.className = 'message-title'
+      title.textContent = messageTitle(message)
+      const content = document.createElement('div')
+      content.textContent = message.content
+      item.append(title, content)
+      messagesEl.append(item)
+    }
+    messagesEl.scrollTop = messagesEl.scrollHeight
+  }
+
+  function render(state: TeamRoomState): void {
+    currentState = state
+    if (summaryEl) summaryEl.textContent = `${state.roles.length} 个角色 · ${state.messages.length} 条消息`
+    renderRoles(state)
+    renderMessages(state)
+  }
+
+  launcher?.addEventListener('click', () => setExpanded(!expanded))
+  collapse?.addEventListener('click', () => setExpanded(false))
+  form?.addEventListener('submit', event => {
+    event.preventDefault()
+    const raw = textarea?.value.trim() || ''
+    if (!raw) return
+
+    if (textarea) textarea.value = ''
+    sendRuntimeMessage({ type: 'TEAM_SEND_MESSAGE', raw }).catch(error => console.warn('[OpenTeam] send message failed', error))
+  })
+
+  render(initialState)
+
+  return { render }
+}
+
+function ensureHostPanel(state: TeamRoomState): void {
+  const existing = document.getElementById(PANEL_ID)
+  if (existing && panelApi) {
+    panelApi.render(state)
+    return
+  }
+
+  if (existing) existing.remove()
+  panelApi = createTeamPanel(state)
+}
+
+function assignRole(role: AssignedRole): void {
+  assignedRole = role
+  activeMessageId = undefined
+  replyTimeout.clear()
+  replyTracker.seed(getConversationId(), getAllAssistantReplies())
+  log.info('role-assigned', { roleId: role.roleId, roleName: role.roleName, roomId: role.roomId, conversationId: getConversationId() })
 }
 
 function registerMessageHandlers(): void {
-  chrome.runtime.onMessage.addListener((message: TeamSendPromptMessage, _sender, sendResponse) => {
+  chrome.runtime.onMessage.addListener((message: ContentRuntimeMessage, _sender, sendResponse) => {
+    if (message?.type === 'TEAM_ASSIGN_ROLE') {
+      log.info('message:assign-role', { roleId: message.roleId, roleName: message.roleName, roomId: message.roomId })
+      assignRole({
+        roleId: message.roleId,
+        roleName: message.roleName,
+        roomId: message.roomId,
+      })
+      sendResponse({ ok: true })
+      return false
+    }
+
+    if (message?.type === 'TEAM_STATE_UPDATED') {
+      log.debug('message:state-updated', { roles: message.state.roles.length, messages: message.state.messages.length })
+      currentState = message.state
+      ensureHostPanel(message.state)
+      sendResponse({ ok: true })
+      return false
+    }
+
+    if (message?.type === 'TEAM_ERROR') {
+      log.warn('message:team-error', { message: message.message })
+      sendResponse({ ok: true })
+      return false
+    }
+
     if (message?.type !== 'TEAM_SEND_PROMPT') return false
 
-    fillAndSend(message.content, message.autoSend !== false)
-      .then(() => sendResponse({ ok: true, messageId: message.messageId }))
+    log.info('message:send-prompt', { messageId: message.messageId, contentLength: message.content.length, autoSend: message.autoSend })
+    activeMessageId = message.messageId
+    replyTimeout.clear()
+    sendRuntimeMessage({ type: 'TEAM_ROLE_STATUS', status: 'sending' })
+      .then(() => {
+        log.info('message:send-prompt:delay-before-input', { messageId: message.messageId, delayMs: PROMPT_INPUT_DELAY_MS })
+        return waitBeforePromptInput()
+      })
+      .then(() => fillAndSend(message.content, message.autoSend !== false))
+      .then(() => sendRuntimeMessage({ type: 'TEAM_ROLE_STATUS', status: 'generating' }))
+      .then(() => {
+        if (message.messageId) replyTimeout.arm(message.messageId)
+        log.info('message:send-prompt:ok', { messageId: message.messageId })
+        sendResponse({ ok: true, messageId: message.messageId })
+      })
       .catch(error => {
         const reason = error instanceof Error ? error.message : String(error)
+        log.warn('message:send-prompt:failed', { messageId: message.messageId, error: reason })
+        activeMessageId = undefined
+        replyTimeout.clear()
+        sendRuntimeMessage({ type: 'TEAM_ROLE_STATUS', status: 'error', error: reason }).catch(() => undefined)
         sendResponse({ ok: false, messageId: message.messageId, error: reason })
       })
 
@@ -223,20 +764,70 @@ function registerMessageHandlers(): void {
   })
 }
 
-function startOpenTeam(): void {
-  registerMessageHandlers()
-
-  let lastReplyHash = ''
+function startReplyReporting(): void {
   observeResponseContainers(text => {
-    const nextHash = String(hashStr(`${getConversationId()}:${text}`))
-    if (nextHash === lastReplyHash) return
+    if (!assignedRole) return
 
-    lastReplyHash = nextHash
-    console.debug('[OpenTeam] stable Gemini response observed', {
-      conversationId: getConversationId(),
-      textLength: text.length,
+    const messageId = activeMessageId
+    if (!replyTracker.consumeIfNewForMessage(getConversationId(), text, messageId)) {
+      log.debug('reply:skipped', { messageId, textLength: text.length, roleId: assignedRole.roleId })
+      return
+    }
+    activeMessageId = undefined
+    replyTimeout.clear()
+    log.info('reply:accepted', { messageId, textLength: text.length, roleId: assignedRole.roleId, roleName: assignedRole.roleName })
+
+    sendRuntimeMessage({
+      type: 'TEAM_ROLE_REPLY',
+      messageId,
+      content: text,
     })
+      .then(() => sendRuntimeMessage({ type: 'TEAM_ROLE_STATUS', status: 'idle' }))
+      .catch(error => log.warn('reply:report-failed', { error: error instanceof Error ? error.message : String(error) }))
   })
+}
+
+async function identifyPage(): Promise<void> {
+  const response = await sendRuntimeMessage<{
+    ok: boolean
+    mode?: 'host' | 'role'
+    state?: TeamRoomState
+    role?: TeamRole
+    error?: string
+  }>({
+    type: 'TEAM_CONTENT_READY',
+    conversationId: getConversationId(),
+  })
+
+  if (!response.ok) {
+    log.warn('identify:failed', { error: response.error })
+    return
+  }
+
+  if (response.mode === 'role' && response.role) {
+    log.info('identify:role', { roleId: response.role.id, roleName: response.role.name, tabId: response.role.tabId })
+    assignRole({
+      roleId: response.role.id,
+      roleName: response.role.name,
+      roomId: currentState?.roomId || '',
+    })
+    return
+  }
+
+  if (response.mode === 'host' && response.state) {
+    log.info('identify:host', { roles: response.state.roles.length, messages: response.state.messages.length })
+    ensureHostPanel(response.state)
+    sendRuntimeMessage({ type: 'TEAM_HOST_READY' }).catch(error =>
+      log.warn('host-ready:failed', { error: error instanceof Error ? error.message : String(error) }),
+    )
+  }
+}
+
+function startOpenTeam(): void {
+  log.info('boot', { href: location.href, conversationId: getConversationId() })
+  registerMessageHandlers()
+  startReplyReporting()
+  identifyPage().catch(error => log.warn('boot:failed', { error: error instanceof Error ? error.message : String(error) }))
 }
 
 function bootWhenReady(): void {
