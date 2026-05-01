@@ -236,6 +236,10 @@
         flex-direction: column;
       }
 
+      .sidebar {
+        position: relative;
+      }
+
       .sidebar,
       .workspace {
         border-right: 1px solid var(--line);
@@ -377,10 +381,69 @@
       }
 
       .chat-create {
-        display: none;
+        position: absolute;
+        top: 142px;
+        right: 14px;
+        left: 14px;
+        z-index: 6;
+        display: grid;
         gap: 10px;
-        padding: 14px 16px;
-        border-bottom: 1px solid var(--line);
+        border: 1px solid rgba(132, 153, 171, 0.24);
+        border-radius: 10px;
+        padding: 12px;
+        background:
+          radial-gradient(circle at 18% 0%, rgba(47, 216, 204, 0.12), transparent 42%),
+          rgba(9, 17, 25, 0.96);
+        box-shadow: 0 20px 52px rgba(0, 0, 0, 0.42), var(--glow);
+        backdrop-filter: blur(20px);
+      }
+
+      .chat-create[hidden] {
+        display: none;
+      }
+
+      .mode-options {
+        display: grid;
+        gap: 8px;
+      }
+
+      .mode-option {
+        display: grid;
+        grid-template-columns: auto minmax(0, 1fr);
+        gap: 8px;
+        align-items: start;
+        border: 1px solid rgba(132, 153, 171, 0.16);
+        border-radius: 8px;
+        padding: 9px;
+        background: rgba(132, 153, 171, 0.06);
+        cursor: pointer;
+      }
+
+      .mode-option:has(input:checked) {
+        border-color: rgba(47, 216, 204, 0.52);
+        background: rgba(47, 216, 204, 0.1);
+      }
+
+      .mode-option input {
+        width: 14px;
+        height: 14px;
+        margin: 2px 0 0;
+        accent-color: var(--brand);
+      }
+
+      .mode-name {
+        display: block;
+        color: var(--text);
+        font-size: 12px;
+        font-weight: 760;
+      }
+
+      .mode-help {
+        display: block;
+        margin-top: 2px;
+        color: var(--subtle);
+        font-size: 11px;
+        line-height: 1.35;
       }
 
       .field,
@@ -1030,19 +1093,38 @@
             <h2>群聊</h2>
             <p id="store-summary" class="tiny">加载群聊中</p>
           </div>
-          <button id="quick-create-chat" class="icon-btn" type="button" aria-label="新建群聊">＋</button>
+          <button id="quick-create-chat" class="icon-btn" type="button" aria-label="新建群聊" aria-controls="chat-create-popover" aria-expanded="false">＋</button>
         </div>
 
-        <form id="create-chat-form" class="chat-create">
+        <form id="create-chat-form" class="chat-create" hidden>
+          <div id="chat-create-popover">
+            <h3>新建群聊</h3>
+          </div>
           <div class="field">
-            <label for="new-chat-name">新建群聊</label>
+            <label for="new-chat-name">群聊名称</label>
             <input id="new-chat-name" type="text" placeholder="例如：产品方案讨论" autocomplete="off" />
           </div>
+          <div class="field">
+            <label>群聊模式</label>
+            <div class="mode-options">
+              <label class="mode-option" for="new-chat-mode-independent">
+                <input id="new-chat-mode-independent" type="radio" name="new-chat-mode" value="independent" checked />
+                <span>
+                  <span class="mode-name">独立专家</span>
+                  <span class="mode-help">人员独立回答，适合并行评审。</span>
+                </span>
+              </label>
+              <label class="mode-option" for="new-chat-mode-collaborative">
+                <input id="new-chat-mode-collaborative" type="radio" name="new-chat-mode" value="collaborative" />
+                <span>
+                  <span class="mode-name">协作群聊</span>
+                  <span class="mode-help">人员参考群聊上下文，适合接力讨论。</span>
+                </span>
+              </label>
+            </div>
+          </div>
           <div class="two-col">
-            <select id="new-chat-mode" aria-label="群聊模式">
-              <option value="independent">独立专家</option>
-              <option value="collaborative">协作群聊</option>
-            </select>
+            <button id="cancel-create-chat" class="btn" type="button">取消</button>
             <button class="btn btn-primary" type="submit">创建</button>
           </div>
         </form>

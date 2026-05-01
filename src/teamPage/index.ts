@@ -53,7 +53,8 @@ const referenceDraftEl = requireElement<HTMLElement>('#reference-draft')
 const mentionPanelEl = requireElement<HTMLElement>('#mention-panel')
 const errorEl = requireElement<HTMLElement>('#error')
 const newChatNameEl = requireElement<HTMLInputElement>('#new-chat-name')
-const newChatModeEl = requireElement<HTMLSelectElement>('#new-chat-mode')
+const createChatFormEl = requireElement<HTMLFormElement>('#create-chat-form')
+const quickCreateChatEl = requireElement<HTMLButtonElement>('#quick-create-chat')
 const newRoleNameEl = requireElement<HTMLInputElement>('#new-role-name')
 const editRoleNameEl = requireElement<HTMLInputElement>('#edit-role-name')
 const editRoleDescriptionEl = requireElement<HTMLTextAreaElement>('#edit-role-description')
@@ -690,6 +691,17 @@ function resetTemplateForm(): void {
   renderTemplates()
 }
 
+function readNewChatMode(): RoomMode {
+  const selected = document.querySelector<HTMLInputElement>('input[name="new-chat-mode"]:checked')
+  return selected?.value === 'collaborative' ? 'collaborative' : 'independent'
+}
+
+function setChatCreatePopoverVisible(visible: boolean): void {
+  createChatFormEl.hidden = !visible
+  quickCreateChatEl.setAttribute('aria-expanded', String(visible))
+  if (visible) newChatNameEl.focus()
+}
+
 function showError(message: string): void {
   errorEl.textContent = message
   errorEl.hidden = false
@@ -781,20 +793,24 @@ function registerUi(): void {
     refreshStore().catch(error => showError(error instanceof Error ? error.message : String(error)))
   })
 
-  requireElement<HTMLButtonElement>('#quick-create-chat').addEventListener('click', () => {
-    const mode = newChatModeEl.value as RoomMode
-    runCommand('GROUP_CHAT_CREATE', { name: '新群聊', mode, roles: [] }).catch(error => showError(error.message))
+  quickCreateChatEl.addEventListener('click', () => {
+    setChatCreatePopoverVisible(createChatFormEl.hidden)
   })
 
   requireElement<HTMLButtonElement>('#close-window').addEventListener('click', () => {
     window.close()
   })
 
-  requireElement<HTMLFormElement>('#create-chat-form').addEventListener('submit', event => {
+  requireElement<HTMLButtonElement>('#cancel-create-chat').addEventListener('click', () => {
+    setChatCreatePopoverVisible(false)
+  })
+
+  createChatFormEl.addEventListener('submit', event => {
     event.preventDefault()
     const name = newChatNameEl.value.trim() || '新群聊'
-    const mode = newChatModeEl.value as RoomMode
+    const mode = readNewChatMode()
     newChatNameEl.value = ''
+    setChatCreatePopoverVisible(false)
     runCommand('GROUP_CHAT_CREATE', { name, mode, roles: [] }).catch(error => showError(error.message))
   })
 
