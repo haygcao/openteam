@@ -37,7 +37,7 @@ export type IframeHostEvent =
   | { type: 'group-created'; chatId: string; group: HTMLElement }
   | { type: 'group-highlighted'; chatId: string }
   | { type: 'group-preserved'; chatId: string }
-  | { type: 'role-created'; chatId: string; roleId: string; iframe: HTMLIFrameElement; srcKind: 'conversation' | 'gemini-home' }
+  | { type: 'role-created'; chatId: string; roleId: string; iframe: HTMLIFrameElement; srcKind: 'conversation' | 'site-home' }
   | { type: 'role-reused'; chatId: string; roleId: string; iframe: HTMLIFrameElement }
   | { type: 'role-recovered'; chatId: string; roleId: string; iframe: HTMLIFrameElement }
   | { type: 'role-assigned'; chatId: string; roleId: string; attempts: number }
@@ -311,7 +311,7 @@ export class IframeHost {
       chatId: role.chatId,
       roleId: role.id,
       iframe,
-      srcKind: src === 'https://gemini.google.com/' ? 'gemini-home' : 'conversation',
+      srcKind: src === getSafeSupportedChatIframeSrcForSite(undefined, role.chatSite) ? 'site-home' : 'conversation',
     })
     return record
   }

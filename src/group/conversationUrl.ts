@@ -4,7 +4,9 @@ const GEMINI_APP_PREFIX = '/app/'
 const CHATGPT_ORIGIN = 'https://chatgpt.com'
 const CHATGPT_HOME_URL = 'https://chatgpt.com/'
 const CHATGPT_HOSTS = new Set(['chatgpt.com', 'chat.openai.com'])
-type ChatSite = 'gemini' | 'chatgpt'
+const CLAUDE_ORIGIN = 'https://claude.ai'
+const CLAUDE_HOME_URL = 'https://claude.ai/new'
+type ChatSite = 'gemini' | 'chatgpt' | 'claude'
 
 export function isSafeGeminiUrl(value: string | undefined): value is string {
   if (!value || !value.startsWith(GEMINI_HOME_URL)) return false
@@ -26,7 +28,7 @@ export function getSafeGeminiIframeSrc(value: string | undefined): string {
 }
 
 export function isSafeSupportedChatUrl(value: string | undefined): value is string {
-  return isSafeGeminiUrl(value) || isSafeChatGptUrl(value)
+  return isSafeGeminiUrl(value) || isSafeChatGptUrl(value) || isSafeClaudeUrl(value)
 }
 
 export function getSafeSupportedChatUrl(value: string | undefined): string {
@@ -38,7 +40,9 @@ export function getSafeSupportedChatIframeSrc(value: string | undefined): string
 }
 
 export function getDefaultChatSiteUrl(site: ChatSite | undefined): string {
-  return site === 'chatgpt' ? CHATGPT_HOME_URL : GEMINI_HOME_URL
+  if (site === 'chatgpt') return CHATGPT_HOME_URL
+  if (site === 'claude') return CLAUDE_HOME_URL
+  return GEMINI_HOME_URL
 }
 
 export function getSafeSupportedChatIframeSrcForSite(value: string | undefined, site: ChatSite | undefined): string {
@@ -50,7 +54,7 @@ export function normalizeSupportedChatConversationUrl(value: string | undefined)
 }
 
 export function extractSupportedConversationId(value: string | undefined): string | undefined {
-  return extractGeminiConversationId(value) ?? extractChatGptConversationId(value)
+  return extractGeminiConversationId(value) ?? extractChatGptConversationId(value) ?? extractClaudeConversationId(value)
 }
 
 export function getSupportedChatOrigin(value: string | undefined): string {
@@ -60,7 +64,9 @@ export function getSupportedChatOrigin(value: string | undefined): string {
 
 export function getSupportedChatOriginForSite(value: string | undefined, site: ChatSite | undefined): string {
   if (isSafeSupportedChatUrl(value)) return new URL(value).origin
-  return site === 'chatgpt' ? CHATGPT_ORIGIN : GEMINI_ORIGIN
+  if (site === 'chatgpt') return CHATGPT_ORIGIN
+  if (site === 'claude') return CLAUDE_ORIGIN
+  return GEMINI_ORIGIN
 }
 
 export function extractGeminiConversationId(value: string | undefined): string | undefined {
@@ -95,5 +101,26 @@ function extractChatGptConversationId(value: string | undefined): string | undef
   if (!url.pathname.startsWith('/c/')) return undefined
 
   const conversationId = url.pathname.slice('/c/'.length).split('/')[0]
+  return conversationId ? decodeURIComponent(conversationId) : undefined
+}
+
+function isSafeClaudeUrl(value: string | undefined): value is string {
+  if (!value || !value.startsWith('https://claude.ai/')) return false
+
+  try {
+    const url = new URL(value)
+    return url.protocol === 'https:' && url.hostname === 'claude.ai'
+  } catch {
+    return false
+  }
+}
+
+function extractClaudeConversationId(value: string | undefined): string | undefined {
+  if (!isSafeClaudeUrl(value)) return undefined
+
+  const url = new URL(value)
+  if (!url.pathname.startsWith('/chat/')) return undefined
+
+  const conversationId = url.pathname.slice('/chat/'.length).split('/')[0]
   return conversationId ? decodeURIComponent(conversationId) : undefined
 }

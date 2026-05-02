@@ -458,7 +458,7 @@ async function handleChatUpdate(message: RuntimeMessage) {
 async function handleSettingsUpdate(message: RuntimeMessage) {
   const { store } = await mutateStore(store => {
     const defaultChatSite = readOptionalString(message.defaultChatSite)
-    if (defaultChatSite === 'chatgpt' || defaultChatSite === 'gemini') {
+    if (defaultChatSite === 'chatgpt' || defaultChatSite === 'gemini' || defaultChatSite === 'claude') {
       store.settings.defaultChatSite = defaultChatSite
     }
   })
@@ -545,7 +545,14 @@ async function handleRoleCreate(message: RuntimeMessage) {
   const { store, result } = await mutateStore(store => createGroupRole(store, {
     chatId,
     templateId,
-    chatSite: message.chatSite === 'chatgpt' ? 'chatgpt' : message.chatSite === 'gemini' ? 'gemini' : undefined,
+    chatSite:
+      message.chatSite === 'chatgpt'
+        ? 'chatgpt'
+        : message.chatSite === 'claude'
+          ? 'claude'
+          : message.chatSite === 'gemini'
+            ? 'gemini'
+            : undefined,
     name: readOptionalString(message.name),
     description: readOptionalString(message.description),
     systemPrompt: readOptionalString(message.systemPrompt),
@@ -591,7 +598,14 @@ async function handleRoleUpdate(message: RuntimeMessage) {
       description: readOptionalString(patch.description),
       systemPrompt: readOptionalString(patch.systemPrompt),
       avatarColor: readOptionalString(patch.avatarColor),
-      chatSite: patch.chatSite === 'chatgpt' ? 'chatgpt' : patch.chatSite === 'gemini' ? 'gemini' : undefined,
+      chatSite:
+        patch.chatSite === 'chatgpt'
+          ? 'chatgpt'
+          : patch.chatSite === 'claude'
+            ? 'claude'
+            : patch.chatSite === 'gemini'
+              ? 'gemini'
+              : undefined,
     }, now())
     const siteChanged = previousChatSite !== updatedRole.chatSite
     if (siteChanged) runtimeFrames.removeRole(updatedRole.chatId, updatedRole.id)
@@ -1082,7 +1096,14 @@ function legacyStatus(status: GroupRole['status']): string {
 
 function readGroupRoleBatchItem(value: unknown): Parameters<typeof createGroupRolesBatch>[2][number] {
   if (!isRecord(value)) throw new Error('添加人员项无效')
-  const chatSite = value.chatSite === 'chatgpt' ? 'chatgpt' : value.chatSite === 'gemini' ? 'gemini' : undefined
+  const chatSite =
+    value.chatSite === 'chatgpt'
+      ? 'chatgpt'
+      : value.chatSite === 'claude'
+        ? 'claude'
+        : value.chatSite === 'gemini'
+          ? 'gemini'
+          : undefined
 
   if (value.source === 'library') {
     return {

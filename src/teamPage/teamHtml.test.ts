@@ -23,6 +23,7 @@ describe('team.html chat creation UI', () => {
     expect(html).toContain('id="add-person-modal"')
     expect(html).toContain('id="add-person-site-gemini"')
     expect(html).toContain('id="add-person-site-chatgpt"')
+    expect(html).toContain('id="add-person-site-claude"')
     expect(html).toContain('id="add-library-people-form"')
     expect(html).toContain('id="add-temporary-person-form"')
     expect(html).toContain('id="toggle-people-drawer"')
@@ -44,6 +45,7 @@ describe('team.html chat creation UI', () => {
     expect(source).toContain('const chatSite = readAddPersonChatSite()')
     expect(source).toContain("{ source: 'library', roleTemplateId, chatSite }")
     expect(source).toContain("{ source: 'temporary', ...draft, chatSite }")
+    expect(source).toContain("selected?.value === 'claude'")
   })
 
   it('uses a clean page background without decorative side panels', () => {

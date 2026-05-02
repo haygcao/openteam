@@ -110,6 +110,21 @@ describe('group store', () => {
     })
   })
 
+  it('keeps Claude as a valid default chat site when loading stored data', async () => {
+    stored[STORE_KEY] = {
+      settings: {
+        defaultMode: 'independent',
+        defaultChatSite: 'claude',
+      },
+    }
+
+    await expect(loadStore()).resolves.toMatchObject({
+      settings: {
+        defaultChatSite: 'claude',
+      },
+    })
+  })
+
   it('migrates the legacy single-key store into split storage', async () => {
     stored[STORE_KEY] = {
       version: 1,

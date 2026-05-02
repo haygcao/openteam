@@ -334,7 +334,12 @@ function normalizeSettings(raw: unknown): OpenTeamSettings {
   return {
     defaultMode: raw.defaultMode === 'collaborative' ? 'collaborative' : DEFAULT_SETTINGS.defaultMode,
     maxContextChars: typeof raw.maxContextChars === 'number' ? raw.maxContextChars : DEFAULT_SETTINGS.maxContextChars,
-    defaultChatSite: raw.defaultChatSite === 'chatgpt' ? 'chatgpt' : DEFAULT_SETTINGS.defaultChatSite,
+    defaultChatSite:
+      raw.defaultChatSite === 'chatgpt'
+        ? 'chatgpt'
+        : raw.defaultChatSite === 'claude'
+          ? 'claude'
+          : DEFAULT_SETTINGS.defaultChatSite,
   }
 }
 

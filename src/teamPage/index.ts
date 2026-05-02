@@ -82,6 +82,7 @@ const settingsButtonEl = requireElement<HTMLButtonElement>('#settings-button')
 const settingsMenuEl = requireElement<HTMLElement>('#settings-menu')
 const defaultSiteGeminiEl = requireElement<HTMLButtonElement>('#default-site-gemini')
 const defaultSiteChatGptEl = requireElement<HTMLButtonElement>('#default-site-chatgpt')
+const defaultSiteClaudeEl = requireElement<HTMLButtonElement>('#default-site-claude')
 const peopleLibraryModalEl = requireElement<HTMLElement>('#people-library-modal')
 const addPersonModalEl = requireElement<HTMLElement>('#add-person-modal')
 const peopleLibrarySummaryEl = requireElement<HTMLElement>('#people-library-summary')
@@ -89,6 +90,7 @@ const peopleLibraryListEl = requireElement<HTMLElement>('#people-library-list')
 const addLibraryPeopleListEl = requireElement<HTMLElement>('#add-library-people-list')
 const addPersonSiteGeminiEl = requireElement<HTMLInputElement>('#add-person-site-gemini')
 const addPersonSiteChatGptEl = requireElement<HTMLInputElement>('#add-person-site-chatgpt')
+const addPersonSiteClaudeEl = requireElement<HTMLInputElement>('#add-person-site-claude')
 const temporaryPersonNameEl = requireElement<HTMLInputElement>('#temporary-person-name')
 const temporaryPersonDescriptionEl = requireElement<HTMLTextAreaElement>('#temporary-person-description')
 const temporaryPersonPromptEl = requireElement<HTMLTextAreaElement>('#temporary-person-prompt')
@@ -292,8 +294,10 @@ function renderSettingsMenu(): void {
   const defaultChatSite = store.settings.defaultChatSite
   defaultSiteGeminiEl.disabled = defaultChatSite === 'gemini'
   defaultSiteChatGptEl.disabled = defaultChatSite === 'chatgpt'
+  defaultSiteClaudeEl.disabled = defaultChatSite === 'claude'
   defaultSiteGeminiEl.setAttribute('aria-pressed', String(defaultChatSite === 'gemini'))
   defaultSiteChatGptEl.setAttribute('aria-pressed', String(defaultChatSite === 'chatgpt'))
+  defaultSiteClaudeEl.setAttribute('aria-pressed', String(defaultChatSite === 'claude'))
 }
 
 function renderSelectedChat(): void {
@@ -840,25 +844,18 @@ function roleCard(role: GroupRole): HTMLElement {
 
   const siteActions = document.createElement('div')
   siteActions.className = 'chat-row tiny'
-  const geminiButton = document.createElement('button')
-  geminiButton.type = 'button'
-  geminiButton.className = 'btn btn-ghost'
-  geminiButton.textContent = 'Gemini'
-  geminiButton.disabled = role.chatSite !== 'chatgpt'
-  geminiButton.addEventListener('click', event => {
-    event.stopPropagation()
-    switchRoleSite(role, 'gemini').catch(error => showError(error instanceof Error ? error.message : String(error)))
-  })
-  const chatGptButton = document.createElement('button')
-  chatGptButton.type = 'button'
-  chatGptButton.className = 'btn btn-ghost'
-  chatGptButton.textContent = 'ChatGPT'
-  chatGptButton.disabled = role.chatSite === 'chatgpt'
-  chatGptButton.addEventListener('click', event => {
-    event.stopPropagation()
-    switchRoleSite(role, 'chatgpt').catch(error => showError(error instanceof Error ? error.message : String(error)))
-  })
-  siteActions.append(geminiButton, chatGptButton)
+  for (const site of ['gemini', 'chatgpt', 'claude'] as const) {
+    const button = document.createElement('button')
+    button.type = 'button'
+    button.className = 'btn btn-ghost'
+    button.textContent = siteLabel(site)
+    button.disabled = role.chatSite === site
+    button.addEventListener('click', event => {
+      event.stopPropagation()
+      switchRoleSite(role, site).catch(error => showError(error instanceof Error ? error.message : String(error)))
+    })
+    siteActions.append(button)
+  }
   main.append(row, description, meta, siteActions)
 
   const more = document.createElement('div')
@@ -880,7 +877,9 @@ function isTemplateUsed(templateId: string): boolean {
 }
 
 function siteLabel(site: ChatSite | undefined): string {
-  return site === 'chatgpt' ? 'ChatGPT' : 'Gemini'
+  if (site === 'chatgpt') return 'ChatGPT'
+  if (site === 'claude') return 'Claude'
+  return 'Gemini'
 }
 
 async function switchRoleSite(role: GroupRole, chatSite: ChatSite): Promise<void> {
@@ -918,9 +917,10 @@ function templateCard(template: RoleTemplate): HTMLElement {
 }
 
 function renderAddPersonDialog(): void {
-  const defaultSite = store.settings.defaultChatSite === 'chatgpt' ? 'chatgpt' : 'gemini'
+  const defaultSite = store.settings.defaultChatSite
   addPersonSiteGeminiEl.checked = defaultSite === 'gemini'
   addPersonSiteChatGptEl.checked = defaultSite === 'chatgpt'
+  addPersonSiteClaudeEl.checked = defaultSite === 'claude'
 
   const templates = getTemplates()
   addLibraryPeopleListEl.replaceChildren()
@@ -1185,7 +1185,9 @@ function selectedLibraryTemplateIds(): string[] {
 
 function readAddPersonChatSite(): ChatSite {
   const selected = document.querySelector<HTMLInputElement>('input[name="add-person-chat-site"]:checked')
-  return selected?.value === 'chatgpt' ? 'chatgpt' : 'gemini'
+  if (selected?.value === 'chatgpt') return 'chatgpt'
+  if (selected?.value === 'claude') return 'claude'
+  return 'gemini'
 }
 
 async function addPeopleToCurrentChat(items: Record<string, unknown>[]): Promise<void> {
@@ -1337,6 +1339,12 @@ function registerUi(): void {
     settingsMenuEl.hidden = true
     settingsButtonEl.setAttribute('aria-expanded', 'false')
     runCommand('GROUP_SETTINGS_UPDATE', { defaultChatSite: 'chatgpt' }).catch(error => showError(error.message))
+  })
+
+  defaultSiteClaudeEl.addEventListener('click', () => {
+    settingsMenuEl.hidden = true
+    settingsButtonEl.setAttribute('aria-expanded', 'false')
+    runCommand('GROUP_SETTINGS_UPDATE', { defaultChatSite: 'claude' }).catch(error => showError(error.message))
   })
 
   requireElement<HTMLButtonElement>('#close-people-library').addEventListener('click', () => {
