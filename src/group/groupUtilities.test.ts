@@ -159,6 +159,20 @@ describe('context sync utilities', () => {
     expect(getContextCursorAfterAck(chat)).toBe(4)
   })
 
+  it('does not sync user messages that were directed to other roles', () => {
+    const chat = makeChat('chat-1')
+    chat.messageIds = ['msg-1', 'msg-2']
+    chat.roleIds = ['role-a', 'role-b']
+    const role = makeRole('role-b', 'B')
+    const messageForA = { ...makeMessage('msg-1', 1, 'user', 'only for A'), targetRoleIds: ['role-a'] }
+    const currentUserMessage = { ...makeMessage('msg-2', 2, 'user', 'current for B'), targetRoleIds: ['role-b'] }
+
+    const context = buildUnsyncedContext(chat, role, [messageForA, currentUserMessage], currentUserMessage)
+
+    expect(context.messages).toEqual([])
+    expect(context.contextText).toBe('')
+  })
+
   it('formats truncated unsynced context and reports the latest message cursor', () => {
     const chat = makeChat('chat-1')
     chat.messageIds = ['msg-1', 'msg-2', 'msg-3']

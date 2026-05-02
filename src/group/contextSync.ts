@@ -19,6 +19,7 @@ export function getUnsyncedMessagesForRole(
     .map(messageId => messageById.get(messageId))
     .filter((message): message is GroupMessage => Boolean(message))
     .filter(message => message.seq > role.contextCursor && message.id !== userMessage.id && message.roleId !== role.id)
+    .filter(message => isMessageVisibleToRole(message, role.id))
 }
 
 export function buildUnsyncedContext(
@@ -59,6 +60,12 @@ export function formatContextMessage(message: GroupMessage): string {
       ? '用户'
       : '系统'
   return `${speaker}：${message.content}`
+}
+
+function isMessageVisibleToRole(message: GroupMessage, roleId: string): boolean {
+  if (message.type !== 'user') return true
+  if (!message.targetRoleIds?.length) return true
+  return message.targetRoleIds.includes(roleId)
 }
 
 function truncateLatest(text: string, maxChars: number): { text: string; omitted: boolean } {

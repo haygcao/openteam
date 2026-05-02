@@ -285,6 +285,29 @@ describe('background group chat experience handlers', () => {
     expect(prompt.content).not.toContain('这是一段很长的人设')
   })
 
+  it('does not replay another role target message when a role receives its first direct prompt', async () => {
+    const store = makeStore()
+    store.currentChatId = 'chat-1'
+    store.chatsById['chat-1'] = { ...makeChat('chat-1', ['role-eng', 'role-pm']), mode: 'collaborative' }
+    store.chatOrder = ['chat-1']
+    store.rolesById['role-eng'] = makeRole('chat-1', 'role-eng', '工程师')
+    store.rolesById['role-pm'] = makeRole('chat-1', 'role-pm', '产品经理')
+    const harness = await setupBackground(store)
+
+    await harness.invoke({ type: 'TEAM_FRAME_ROLE_READY', chatId: 'chat-1', roleId: 'role-eng', hostTabId: 900 }, { tab: { id: 101 } as chrome.tabs.Tab, frameId: 7, url: 'https://gemini.google.com/app/test-eng' })
+    await harness.invoke({ type: 'TEAM_FRAME_ROLE_READY', chatId: 'chat-1', roleId: 'role-pm', hostTabId: 900 }, { tab: { id: 102 } as chrome.tabs.Tab, frameId: 8, url: 'https://gemini.google.com/app/test-pm' })
+    await harness.invoke({ type: 'GROUP_MESSAGE_SEND', chatId: 'chat-1', raw: '@工程师 第一条只给工程师的问题' })
+    const response = await harness.invoke({ type: 'GROUP_MESSAGE_SEND', chatId: 'chat-1', raw: '@产品经理 第二条只给产品经理的问题' }) as { ok: boolean }
+
+    expect(response.ok).toBe(true)
+    const promptCalls = harness.tabsSendMessage.mock.calls.filter(call => call[1]?.type === 'TEAM_SEND_PROMPT')
+    expect(promptCalls).toHaveLength(2)
+    const productPrompt = promptCalls[1][1]
+    expect(productPrompt.roleId).toBe('role-pm')
+    expect(productPrompt.content).toContain('第二条只给产品经理的问题')
+    expect(productPrompt.content).not.toContain('第一条只给工程师的问题')
+  })
+
   it('marks delivery error when a prompt response is explicitly rejected', async () => {
     const store = makeStore()
     store.currentChatId = 'chat-1'
