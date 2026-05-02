@@ -1,4 +1,5 @@
-import type { GroupChat, GroupMessage, GroupRole, MessageReference, OpenTeamStore, RoleStatus, RoleTemplate, RoomMode } from '../group/types'
+import { getDefaultChatSiteUrl } from '../group/conversationUrl'
+import type { ChatSite, GroupChat, GroupMessage, GroupRole, MessageReference, OpenTeamStore, RoleStatus, RoleTemplate, RoomMode } from '../group/types'
 import { createDefaultStore, loadStore, saveStore } from '../group/store'
 import { parseGroupMentions } from '../group/mentionParser'
 import { createIframeHost } from './iframeHost'
@@ -22,7 +23,6 @@ type StorePushMessage =
 type TemplateDraft = Pick<RoleTemplate, 'name' | 'description' | 'systemPrompt'>
 type CachedMessageNode = { signature: string; node: HTMLElement }
 
-const GEMINI_URL = 'https://gemini.google.com/'
 const MAX_CACHED_MESSAGE_NODES = 400
 const AUTO_RECONNECT_TIMEOUT_MS = 20_000
 
@@ -80,11 +80,15 @@ const templateFormTitleEl = requireElement<HTMLElement>('#template-form-title')
 const deleteTemplateEl = requireElement<HTMLButtonElement>('#delete-template')
 const settingsButtonEl = requireElement<HTMLButtonElement>('#settings-button')
 const settingsMenuEl = requireElement<HTMLElement>('#settings-menu')
+const defaultSiteGeminiEl = requireElement<HTMLButtonElement>('#default-site-gemini')
+const defaultSiteChatGptEl = requireElement<HTMLButtonElement>('#default-site-chatgpt')
 const peopleLibraryModalEl = requireElement<HTMLElement>('#people-library-modal')
 const addPersonModalEl = requireElement<HTMLElement>('#add-person-modal')
 const peopleLibrarySummaryEl = requireElement<HTMLElement>('#people-library-summary')
 const peopleLibraryListEl = requireElement<HTMLElement>('#people-library-list')
 const addLibraryPeopleListEl = requireElement<HTMLElement>('#add-library-people-list')
+const addPersonSiteGeminiEl = requireElement<HTMLInputElement>('#add-person-site-gemini')
+const addPersonSiteChatGptEl = requireElement<HTMLInputElement>('#add-person-site-chatgpt')
 const temporaryPersonNameEl = requireElement<HTMLInputElement>('#temporary-person-name')
 const temporaryPersonDescriptionEl = requireElement<HTMLTextAreaElement>('#temporary-person-description')
 const temporaryPersonPromptEl = requireElement<HTMLTextAreaElement>('#temporary-person-prompt')
@@ -278,9 +282,18 @@ function syncIframeHost(): void {
 }
 
 function render(): void {
+  renderSettingsMenu()
   renderSelectedChat()
   renderTemplates()
   renderAddPersonDialog()
+}
+
+function renderSettingsMenu(): void {
+  const defaultChatSite = store.settings.defaultChatSite
+  defaultSiteGeminiEl.disabled = defaultChatSite === 'gemini'
+  defaultSiteChatGptEl.disabled = defaultChatSite === 'chatgpt'
+  defaultSiteGeminiEl.setAttribute('aria-pressed', String(defaultChatSite === 'gemini'))
+  defaultSiteChatGptEl.setAttribute('aria-pressed', String(defaultChatSite === 'chatgpt'))
 }
 
 function renderSelectedChat(): void {
@@ -823,8 +836,30 @@ function roleCard(role: GroupRole): HTMLElement {
 
   const meta = document.createElement('div')
   meta.className = 'chat-row tiny'
-  meta.append(textNode(`cursor ${role.contextCursor}`), textNode(role.geminiConversationUrl ? '已有会话' : '未绑定会话'))
-  main.append(row, description, meta)
+  meta.append(textNode(siteLabel(role.chatSite)), textNode(`cursor ${role.contextCursor}`), textNode(role.geminiConversationUrl ? '已有会话' : '未绑定会话'))
+
+  const siteActions = document.createElement('div')
+  siteActions.className = 'chat-row tiny'
+  const geminiButton = document.createElement('button')
+  geminiButton.type = 'button'
+  geminiButton.className = 'btn btn-ghost'
+  geminiButton.textContent = 'Gemini'
+  geminiButton.disabled = role.chatSite !== 'chatgpt'
+  geminiButton.addEventListener('click', event => {
+    event.stopPropagation()
+    switchRoleSite(role, 'gemini').catch(error => showError(error instanceof Error ? error.message : String(error)))
+  })
+  const chatGptButton = document.createElement('button')
+  chatGptButton.type = 'button'
+  chatGptButton.className = 'btn btn-ghost'
+  chatGptButton.textContent = 'ChatGPT'
+  chatGptButton.disabled = role.chatSite === 'chatgpt'
+  chatGptButton.addEventListener('click', event => {
+    event.stopPropagation()
+    switchRoleSite(role, 'chatgpt').catch(error => showError(error instanceof Error ? error.message : String(error)))
+  })
+  siteActions.append(geminiButton, chatGptButton)
+  main.append(row, description, meta, siteActions)
 
   const more = document.createElement('div')
   more.className = 'role-more'
@@ -834,7 +869,7 @@ function roleCard(role: GroupRole): HTMLElement {
   if (role.status === 'error') {
     const error = document.createElement('div')
     error.className = 'reference-box'
-    error.textContent = '人员异常。若 Gemini 未登录，请打开登录页后点击恢复人员。'
+    error.textContent = '人员异常。若目标站点未登录，请打开登录页后点击恢复人员。'
     main.append(error)
   }
   return card
@@ -842,6 +877,19 @@ function roleCard(role: GroupRole): HTMLElement {
 
 function isTemplateUsed(templateId: string): boolean {
   return Object.values(store.rolesById).some(role => role.templateId === templateId)
+}
+
+function siteLabel(site: ChatSite | undefined): string {
+  return site === 'chatgpt' ? 'ChatGPT' : 'Gemini'
+}
+
+async function switchRoleSite(role: GroupRole, chatSite: ChatSite): Promise<void> {
+  if (role.chatSite === chatSite) return
+  await runCommand('GROUP_ROLE_UPDATE', { roleId: role.id, patch: { chatSite } })
+  const updatedRole = store.rolesById[role.id]
+  if (!updatedRole) return
+  iframeHost.recoverRole(updatedRole)
+  await runCommand('GROUP_ROLE_RECOVER', { chatId: updatedRole.chatId, roleId: updatedRole.id })
 }
 
 function templateCard(template: RoleTemplate): HTMLElement {
@@ -870,6 +918,10 @@ function templateCard(template: RoleTemplate): HTMLElement {
 }
 
 function renderAddPersonDialog(): void {
+  const defaultSite = store.settings.defaultChatSite === 'chatgpt' ? 'chatgpt' : 'gemini'
+  addPersonSiteGeminiEl.checked = defaultSite === 'gemini'
+  addPersonSiteChatGptEl.checked = defaultSite === 'chatgpt'
+
   const templates = getTemplates()
   addLibraryPeopleListEl.replaceChildren()
   if (templates.length === 0) {
@@ -1131,6 +1183,11 @@ function selectedLibraryTemplateIds(): string[] {
   return Array.from(addLibraryPeopleListEl.querySelectorAll<HTMLInputElement>('input[type="checkbox"]:checked')).map(input => input.value)
 }
 
+function readAddPersonChatSite(): ChatSite {
+  const selected = document.querySelector<HTMLInputElement>('input[name="add-person-chat-site"]:checked')
+  return selected?.value === 'chatgpt' ? 'chatgpt' : 'gemini'
+}
+
 async function addPeopleToCurrentChat(items: Record<string, unknown>[]): Promise<void> {
   const chat = getCurrentChat()
   if (!chat) return
@@ -1270,6 +1327,18 @@ function registerUi(): void {
     renderTemplates()
   })
 
+  defaultSiteGeminiEl.addEventListener('click', () => {
+    settingsMenuEl.hidden = true
+    settingsButtonEl.setAttribute('aria-expanded', 'false')
+    runCommand('GROUP_SETTINGS_UPDATE', { defaultChatSite: 'gemini' }).catch(error => showError(error.message))
+  })
+
+  defaultSiteChatGptEl.addEventListener('click', () => {
+    settingsMenuEl.hidden = true
+    settingsButtonEl.setAttribute('aria-expanded', 'false')
+    runCommand('GROUP_SETTINGS_UPDATE', { defaultChatSite: 'chatgpt' }).catch(error => showError(error.message))
+  })
+
   requireElement<HTMLButtonElement>('#close-people-library').addEventListener('click', () => {
     peopleLibraryModalEl.hidden = true
   })
@@ -1384,7 +1453,8 @@ function registerUi(): void {
   requireElement<HTMLFormElement>('#add-library-people-form').addEventListener('submit', event => {
     event.preventDefault()
     const templateIds = selectedLibraryTemplateIds()
-    addPeopleToCurrentChat(templateIds.map(roleTemplateId => ({ source: 'library', roleTemplateId })))
+    const chatSite = readAddPersonChatSite()
+    addPeopleToCurrentChat(templateIds.map(roleTemplateId => ({ source: 'library', roleTemplateId, chatSite })))
       .then(() => {
         addPersonModalEl.hidden = true
       })
@@ -1403,7 +1473,8 @@ function registerUi(): void {
       showError(validationError)
       return
     }
-    addPeopleToCurrentChat([{ source: 'temporary', ...draft }])
+    const chatSite = readAddPersonChatSite()
+    addPeopleToCurrentChat([{ source: 'temporary', ...draft, chatSite }])
       .then(() => {
         temporaryPersonNameEl.value = ''
         temporaryPersonDescriptionEl.value = ''
@@ -1439,7 +1510,8 @@ function registerUi(): void {
   })
 
   requireElement<HTMLButtonElement>('#open-gemini-login').addEventListener('click', () => {
-    chrome.tabs.create({ url: GEMINI_URL }).catch(error => showError(error instanceof Error ? error.message : String(error)))
+    const site: ChatSite = store.rolesById[selectedRoleId ?? '']?.chatSite ?? store.settings.defaultChatSite
+    chrome.tabs.create({ url: getDefaultChatSiteUrl(site) }).catch(error => showError(error instanceof Error ? error.message : String(error)))
   })
 }
 

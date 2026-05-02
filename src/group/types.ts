@@ -1,4 +1,5 @@
 export type RoomMode = 'independent' | 'collaborative'
+export type ChatSite = 'gemini' | 'chatgpt'
 
 export type ChatStatus = 'draft' | 'initializing' | 'ready' | 'running' | 'error'
 
@@ -27,6 +28,7 @@ export interface OpenTeamViewState {
 export interface OpenTeamSettings {
   defaultMode: RoomMode
   maxContextChars: number
+  defaultChatSite: ChatSite
 }
 
 export interface GroupChat {
@@ -55,6 +57,7 @@ export interface GroupRole {
   id: string
   chatId: string
   templateId?: string
+  chatSite?: ChatSite
   name: string
   description?: string
   systemPrompt?: string

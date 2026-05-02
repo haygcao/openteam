@@ -1,11 +1,11 @@
-import { getSafeGeminiIframeSrc } from '../group/conversationUrl'
+import { getSafeSupportedChatIframeSrcForSite, getSupportedChatOrigin } from '../group/conversationUrl'
 import type { GroupChat, GroupRole } from '../group/types'
 
 export const FRAME_ASSIGN_MESSAGE = 'OPENTEAM_ASSIGN_FRAME_ROLE'
-export const GEMINI_IFRAME_ALLOW = 'clipboard-read; clipboard-write; microphone; camera; geolocation; autoplay; fullscreen; picture-in-picture; storage-access; web-share'
+export const CHAT_IFRAME_ALLOW = 'clipboard-read; clipboard-write; microphone; camera; geolocation; autoplay; fullscreen; picture-in-picture; storage-access; web-share'
 
 export type IframeHostChat = Pick<GroupChat, 'id' | 'name' | 'roleIds'>
-export type IframeHostRole = Pick<GroupRole, 'id' | 'chatId' | 'name' | 'geminiConversationUrl'>
+export type IframeHostRole = Pick<GroupRole, 'id' | 'chatId' | 'name' | 'chatSite' | 'geminiConversationUrl'>
 
 export interface FrameAssignmentMessage {
   type: typeof FRAME_ASSIGN_MESSAGE
@@ -276,11 +276,11 @@ export class IframeHost {
     label.textContent = role.name
 
     const iframe = this.document.createElement('iframe')
-    const src = getSafeGeminiIframeSrc(role.geminiConversationUrl)
+    const src = getSafeSupportedChatIframeSrcForSite(role.geminiConversationUrl, role.chatSite)
     iframe.className = 'role-frame'
-    iframe.title = `${role.name} Gemini`
+    iframe.title = `${role.name} chat`
     iframe.src = src
-    iframe.allow = GEMINI_IFRAME_ALLOW
+    iframe.allow = CHAT_IFRAME_ALLOW
     iframe.dataset.chatId = role.chatId
     iframe.dataset.roleId = role.id
     iframe.dataset.roleKey = roleKey(role.chatId, role.id)
@@ -322,7 +322,7 @@ export class IframeHost {
     if (existing) {
       const chatName = typeof chat === 'string' ? existing.querySelector<HTMLElement>('.chat-frame-group-title')?.textContent || chat : chat.name
       this.updateChatGroupTitle(existing, chatName)
-      existing.setAttribute('aria-label', `Gemini iframe group for ${chatName}`)
+      existing.setAttribute('aria-label', `AI iframe group for ${chatName}`)
       return existing
     }
     const chatName = typeof chat === 'string' ? chat : chat.name
@@ -332,7 +332,7 @@ export class IframeHost {
     group.dataset.chatFrameGroup = 'true'
     group.dataset.chatId = chatId
     group.dataset.backgroundChat = 'true'
-    group.setAttribute('aria-label', `Gemini iframe group for ${chatName}`)
+    group.setAttribute('aria-label', `AI iframe group for ${chatName}`)
     const title = this.document.createElement('div')
     title.className = 'chat-frame-group-title'
     group.append(title)
@@ -401,7 +401,7 @@ export class IframeHost {
       chatId: record.chatId,
       roleId: record.roleId,
       hostTabId: this.hostTabId,
-    } satisfies FrameAssignmentMessage, 'https://gemini.google.com')
+    } satisfies FrameAssignmentMessage, getSupportedChatOrigin(record.src))
     this.emit({ type: 'role-assigned', chatId: record.chatId, roleId: record.roleId, attempts: record.assignmentAttempts })
   }
 
@@ -436,7 +436,7 @@ export class IframeHost {
     if (record.roleName === roleName && record.label.textContent === roleName) return
     record.roleName = roleName
     record.label.textContent = roleName
-    record.iframe.title = `${roleName} Gemini`
+    record.iframe.title = `${roleName} chat`
   }
 
   private emit(event: IframeHostEvent): void {

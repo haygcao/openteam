@@ -1,5 +1,5 @@
 import { buildUnsyncedContext } from '../group/contextSync'
-import { extractGeminiConversationId, normalizeGeminiConversationUrl } from '../group/conversationUrl'
+import { extractSupportedConversationId, getDefaultChatSiteUrl, normalizeSupportedChatConversationUrl } from '../group/conversationUrl'
 import { parseGroupMentions } from '../group/mentionParser'
 import { buildPrompt, buildReinitPrompt } from '../group/promptBuilder'
 import {
@@ -42,7 +42,6 @@ interface StoreMutationResult<T> {
 
 const GROUP_PUSH_TYPE = 'OPENTEAM_GROUP_PUSH'
 const LEGACY_PUSH_TYPE = 'OPENTEAM_HOST_PUSH'
-const DEFAULT_GEMINI_URL = 'https://gemini.google.com/'
 const STALE_THINKING_MS = 120_000
 const runtimeFrames = createRuntimeFrameRegistry()
 const hostTabIds = new Set<number>()
@@ -456,6 +455,17 @@ async function handleChatUpdate(message: RuntimeMessage) {
   return { ok: true, chat: result.chat, store }
 }
 
+async function handleSettingsUpdate(message: RuntimeMessage) {
+  const { store } = await mutateStore(store => {
+    const defaultChatSite = readOptionalString(message.defaultChatSite)
+    if (defaultChatSite === 'chatgpt' || defaultChatSite === 'gemini') {
+      store.settings.defaultChatSite = defaultChatSite
+    }
+  })
+  await broadcastStoreUpdated(store)
+  return { ok: true, store }
+}
+
 async function handleChatDelete(message: RuntimeMessage) {
   const chatId = requireString(message.chatId, '缺少群聊 ID')
   const { store, result } = await mutateStore(store => {
@@ -535,6 +545,7 @@ async function handleRoleCreate(message: RuntimeMessage) {
   const { store, result } = await mutateStore(store => createGroupRole(store, {
     chatId,
     templateId,
+    chatSite: message.chatSite === 'chatgpt' ? 'chatgpt' : message.chatSite === 'gemini' ? 'gemini' : undefined,
     name: readOptionalString(message.name),
     description: readOptionalString(message.description),
     systemPrompt: readOptionalString(message.systemPrompt),
@@ -571,14 +582,23 @@ async function handleRolesCreateBatch(message: RuntimeMessage) {
 
 async function handleRoleUpdate(message: RuntimeMessage) {
   const patch = isRecord(message.patch) ? message.patch : message
-  const { store, result } = await mutateStore(store => updateGroupRole(store, requireString(message.roleId, '缺少人员 ID'), {
-    name: readOptionalString(patch.name),
-    description: readOptionalString(patch.description),
-    systemPrompt: readOptionalString(patch.systemPrompt),
-    avatarColor: readOptionalString(patch.avatarColor),
-  }, now()))
+  const roleId = requireString(message.roleId, '缺少人员 ID')
+  const { store, result } = await mutateStore(store => {
+    const role = store.rolesById[roleId]
+    const previousChatSite = role?.chatSite
+    const updatedRole = updateGroupRole(store, roleId, {
+      name: readOptionalString(patch.name),
+      description: readOptionalString(patch.description),
+      systemPrompt: readOptionalString(patch.systemPrompt),
+      avatarColor: readOptionalString(patch.avatarColor),
+      chatSite: patch.chatSite === 'chatgpt' ? 'chatgpt' : patch.chatSite === 'gemini' ? 'gemini' : undefined,
+    }, now())
+    const siteChanged = previousChatSite !== updatedRole.chatSite
+    if (siteChanged) runtimeFrames.removeRole(updatedRole.chatId, updatedRole.id)
+    return { role: updatedRole, siteChanged }
+  })
   await broadcastStoreUpdated(store)
-  return { ok: true, role: result, store }
+  return { ok: true, role: result.role, siteChanged: result.siteChanged, store }
 }
 
 async function handleRoleRecover(message: RuntimeMessage) {
@@ -590,7 +610,7 @@ async function handleRoleRecover(message: RuntimeMessage) {
     role.updatedAt = now()
     chat.status = 'initializing'
     chat.updatedAt = role.updatedAt
-    return { role, iframeSrc: normalizeGeminiConversationUrl(role.geminiConversationUrl) ?? DEFAULT_GEMINI_URL }
+    return { role, iframeSrc: normalizeSupportedChatConversationUrl(role.geminiConversationUrl) ?? getDefaultChatSiteUrl(role.chatSite ?? store.settings.defaultChatSite) }
   })
   log.info('role-recover:ready', { roleId: result.role.id, roleName: result.role.name, iframeSrc: result.iframeSrc, status: result.role.status })
   await broadcastStoreUpdated(store)
@@ -988,8 +1008,8 @@ function readIdentity(message: RuntimeMessage, sender: chrome.runtime.MessageSen
 }
 
 function updateConversation(role: GroupRole, conversationUrl: string | undefined, conversationId: string | undefined): void {
-  const safeUrl = normalizeGeminiConversationUrl(conversationUrl)
-  const conversationIdFromUrl = extractGeminiConversationId(safeUrl)
+  const safeUrl = normalizeSupportedChatConversationUrl(conversationUrl)
+  const conversationIdFromUrl = extractSupportedConversationId(safeUrl)
   if (safeUrl && conversationIdFromUrl) {
     role.geminiConversationUrl = safeUrl
     role.geminiConversationId = conversationIdFromUrl
@@ -1062,11 +1082,13 @@ function legacyStatus(status: GroupRole['status']): string {
 
 function readGroupRoleBatchItem(value: unknown): Parameters<typeof createGroupRolesBatch>[2][number] {
   if (!isRecord(value)) throw new Error('添加人员项无效')
+  const chatSite = value.chatSite === 'chatgpt' ? 'chatgpt' : value.chatSite === 'gemini' ? 'gemini' : undefined
 
   if (value.source === 'library') {
     return {
       source: 'library',
       roleTemplateId: requireString(value.roleTemplateId ?? value.templateId, '缺少人员库 ID'),
+      chatSite,
       avatarColor: readOptionalString(value.avatarColor),
     }
   }
@@ -1077,6 +1099,7 @@ function readGroupRoleBatchItem(value: unknown): Parameters<typeof createGroupRo
       name: requireString(value.name, '人员名称不能为空'),
       description: readOptionalString(value.description),
       systemPrompt: requireString(value.systemPrompt, '人设不能为空'),
+      chatSite,
       avatarColor: readOptionalString(value.avatarColor),
     }
   }
@@ -1149,6 +1172,8 @@ chrome.runtime.onMessage.addListener((message: RuntimeMessage, sender, sendRespo
         return handleChatSwitch(message, sender)
       case 'GROUP_CHAT_UPDATE':
         return handleChatUpdate(message)
+      case 'GROUP_SETTINGS_UPDATE':
+        return handleSettingsUpdate(message)
       case 'GROUP_CHAT_DELETE':
         return handleChatDelete(message)
       case 'GROUP_CHAT_MARK_READ':

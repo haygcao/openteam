@@ -17,7 +17,7 @@
   },
   "content_scripts": [
     {
-      "matches": ["*://gemini.google.com/*", "*://*.gemini.google.com/*"],
+      "matches": ["*://gemini.google.com/*", "*://*.gemini.google.com/*", "*://chatgpt.com/*", "*://*.chatgpt.com/*", "*://chat.openai.com/*"],
       "js": ["content.js"],
       "run_at": "document_start",
       "all_frames": true

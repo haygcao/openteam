@@ -105,15 +105,15 @@ describe('background group chat experience handlers', () => {
       type: 'GROUP_ROLES_CREATE_BATCH',
       chatId: 'chat-1',
       items: [
-        { source: 'library', roleTemplateId: 'template-1' },
-        { source: 'temporary', name: '法务', description: '关注合规', systemPrompt: '从法务角度分析' },
+        { source: 'library', roleTemplateId: 'template-1', chatSite: 'chatgpt' },
+        { source: 'temporary', name: '法务', description: '关注合规', systemPrompt: '从法务角度分析', chatSite: 'gemini' },
       ],
     }) as { ok: boolean; roles: GroupRole[]; store: OpenTeamStore }
 
     expect(accepted.ok).toBe(true)
     expect(accepted.roles).toHaveLength(2)
-    expect(accepted.roles[0]).toMatchObject({ templateId: 'template-1', name: '工程师', systemPrompt: '从工程角度分析' })
-    expect(accepted.roles[1]).toMatchObject({ name: '法务', description: '关注合规', systemPrompt: '从法务角度分析' })
+    expect(accepted.roles[0]).toMatchObject({ templateId: 'template-1', name: '工程师', systemPrompt: '从工程角度分析', chatSite: 'chatgpt' })
+    expect(accepted.roles[1]).toMatchObject({ name: '法务', description: '关注合规', systemPrompt: '从法务角度分析', chatSite: 'gemini' })
     expect(accepted.roles[1].templateId).toBeUndefined()
     expect(accepted.store.roleTemplateOrder).toEqual(['template-1'])
     expect(Object.keys(accepted.store.roleTemplatesById)).toEqual(['template-1'])
@@ -707,7 +707,7 @@ function makeStore(): OpenTeamStore {
     messagesById: {},
     roleTemplateOrder: [],
     roleTemplatesById: {},
-    settings: { defaultMode: 'independent', maxContextChars: 6000 },
+    settings: { defaultMode: 'independent', maxContextChars: 6000, defaultChatSite: 'gemini' },
     viewState: { chatReadSeqById: {}, chatHasNewMessageById: {} },
   }
 }

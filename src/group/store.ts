@@ -37,6 +37,7 @@ interface MessageChunk {
 const DEFAULT_SETTINGS: OpenTeamSettings = {
   defaultMode: 'independent',
   maxContextChars: 6000,
+  defaultChatSite: 'gemini',
 }
 
 let storeQueue: Promise<void> = Promise.resolve()
@@ -333,6 +334,7 @@ function normalizeSettings(raw: unknown): OpenTeamSettings {
   return {
     defaultMode: raw.defaultMode === 'collaborative' ? 'collaborative' : DEFAULT_SETTINGS.defaultMode,
     maxContextChars: typeof raw.maxContextChars === 'number' ? raw.maxContextChars : DEFAULT_SETTINGS.maxContextChars,
+    defaultChatSite: raw.defaultChatSite === 'chatgpt' ? 'chatgpt' : DEFAULT_SETTINGS.defaultChatSite,
   }
 }
 

@@ -21,6 +21,8 @@ describe('team.html chat creation UI', () => {
     expect(html).toContain('id="people-library-modal"')
     expect(html).toContain('id="people-library-list"')
     expect(html).toContain('id="add-person-modal"')
+    expect(html).toContain('id="add-person-site-gemini"')
+    expect(html).toContain('id="add-person-site-chatgpt"')
     expect(html).toContain('id="add-library-people-form"')
     expect(html).toContain('id="add-temporary-person-form"')
     expect(html).toContain('id="toggle-people-drawer"')
@@ -30,7 +32,18 @@ describe('team.html chat creation UI', () => {
     expect(html).toContain('id="iframe-host"')
     expect(html).toContain('人员库')
     expect(html).toContain('人设')
+    expect(html).toContain('站点')
     expect(html).not.toContain('System Prompt')
+  })
+
+  it('lets the add-person modal choose a target site before creating roles', () => {
+    const source = readFileSync(resolve(process.cwd(), 'src/teamPage/index.ts'), 'utf8')
+
+    expect(source).toContain('function readAddPersonChatSite(): ChatSite')
+    expect(source).toContain("querySelector<HTMLInputElement>('input[name=\"add-person-chat-site\"]:checked')")
+    expect(source).toContain('const chatSite = readAddPersonChatSite()')
+    expect(source).toContain("{ source: 'library', roleTemplateId, chatSite }")
+    expect(source).toContain("{ source: 'temporary', ...draft, chatSite }")
   })
 
   it('uses a clean page background without decorative side panels', () => {

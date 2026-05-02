@@ -1284,6 +1284,10 @@
         gap: 14px;
       }
 
+      .modal-grid-wide {
+        grid-column: 1 / -1;
+      }
+
       .select-list {
         display: grid;
         gap: 8px;
@@ -1300,6 +1304,12 @@
         border-radius: 8px;
         padding: 10px;
         background: rgba(14, 24, 35, 0.46);
+      }
+
+      .site-picker {
+        display: grid;
+        gap: 8px;
+        margin-bottom: 4px;
       }
 
       #add-role-form {
@@ -1485,6 +1495,8 @@
           <button id="settings-button" class="rail-btn" type="button" aria-label="设置" aria-expanded="false" aria-controls="settings-menu">⚙</button>
           <div id="settings-menu" class="settings-menu" hidden>
             <button id="open-people-library" class="btn btn-ghost" type="button">人员库</button>
+            <button id="default-site-gemini" class="btn btn-ghost" type="button">默认站点：Gemini</button>
+            <button id="default-site-chatgpt" class="btn btn-ghost" type="button">默认站点：ChatGPT</button>
           </div>
         </div>
       </nav>
@@ -1578,7 +1590,7 @@
             <h2>群聊成员与人员</h2>
             <p id="role-summary" class="tiny">0 个人员</p>
           </div>
-          <button id="open-gemini-login" class="icon-btn" type="button" aria-label="Gemini 登录">◇</button>
+          <button id="open-gemini-login" class="icon-btn" type="button" aria-label="AI 站点登录">◇</button>
         </div>
         <div class="role-scroll">
           <div class="section-title">
@@ -1652,6 +1664,25 @@
           <button id="close-add-person" class="icon-btn" type="button" aria-label="关闭添加人员">×</button>
         </div>
         <div class="modal-grid">
+          <div class="field modal-grid-wide site-picker">
+            <label>站点</label>
+            <div class="mode-options">
+              <label class="mode-option" for="add-person-site-gemini">
+                <input id="add-person-site-gemini" type="radio" name="add-person-chat-site" value="gemini" checked />
+                <span>
+                  <span class="mode-name">Gemini</span>
+                  <span class="mode-help">为这次加入群聊的人员统一指定 Gemini。</span>
+                </span>
+              </label>
+              <label class="mode-option" for="add-person-site-chatgpt">
+                <input id="add-person-site-chatgpt" type="radio" name="add-person-chat-site" value="chatgpt" />
+                <span>
+                  <span class="mode-name">ChatGPT</span>
+                  <span class="mode-help">为这次加入群聊的人员统一指定 ChatGPT。</span>
+                </span>
+              </label>
+            </div>
+          </div>
           <form id="add-library-people-form" class="modal-form modal-card">
             <h3>从人员库添加</h3>
             <div id="add-library-people-list" class="select-list"></div>

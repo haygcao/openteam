@@ -58,6 +58,7 @@ describe('group store', () => {
       settings: {
         defaultMode: 'independent',
         maxContextChars: 6000,
+        defaultChatSite: 'gemini',
       },
       viewState: {
         chatReadSeqById: {},
@@ -89,6 +90,7 @@ describe('group store', () => {
       },
       settings: {
         defaultMode: 'collaborative',
+        defaultChatSite: 'gemini',
       },
     }
 
@@ -103,6 +105,7 @@ describe('group store', () => {
       settings: {
         defaultMode: 'collaborative',
         maxContextChars: 6000,
+        defaultChatSite: 'gemini',
       },
     })
   })

@@ -76,6 +76,33 @@ describe('IframeHost', () => {
     expect(host.getChatState('chat-1')[0].assignmentAttempts).toBeGreaterThan(1)
   })
 
+  it('posts role assignments to the ChatGPT origin for ChatGPT role frames', () => {
+    const visibleHost = document.createElement('div')
+    document.body.append(visibleHost)
+    const host = createIframeHost({ visibleHost, assignIntervalMs: 50, hostTabId: 123 })
+
+    host.activateChat(makeChat('chat-1', ['role-1']), [makeRole('chat-1', 'role-1', 'https://chatgpt.com/c/abc')])
+
+    const iframe = host.getRoleFrame('chat-1', 'role-1')
+    expect(iframe?.src).toBe('https://chatgpt.com/c/abc')
+
+    const postMessage = vi.spyOn(iframe!.contentWindow!, 'postMessage')
+    vi.advanceTimersByTime(120)
+
+    const lastCall = postMessage.mock.calls[postMessage.mock.calls.length - 1]
+    expect(lastCall?.[1]).toBe('https://chatgpt.com')
+  })
+
+  it('uses safe ChatGPT conversation URLs for role frames', () => {
+    const visibleHost = document.createElement('div')
+    document.body.append(visibleHost)
+    const host = createIframeHost({ visibleHost })
+
+    host.activateChat(makeChat('chat-1', ['role-1']), [makeRole('chat-1', 'role-1', 'https://chatgpt.com/c/restored')])
+
+    expect(host.getRoleFrame('chat-1', 'role-1')?.src).toBe('https://chatgpt.com/c/restored')
+  })
+
   it('mounts all active chat role iframes in that chat group', () => {
     const visibleHost = document.createElement('div')
     document.body.append(visibleHost)

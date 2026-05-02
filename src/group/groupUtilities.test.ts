@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { extractGeminiConversationId, getSafeGeminiUrl, isSafeGeminiUrl } from './conversationUrl'
+import { extractGeminiConversationId, extractSupportedConversationId, getSafeGeminiUrl, getSafeSupportedChatUrl, isSafeGeminiUrl, isSafeSupportedChatUrl } from './conversationUrl'
 import { buildUnsyncedContext, getContextCursorAfterAck, getUnsyncedMessagesForRole } from './contextSync'
 import { parseGroupMentions } from './mentionParser'
 import { buildInitPrompt, buildPrompt } from './promptBuilder'
@@ -42,19 +42,29 @@ describe('role template utilities', () => {
     expect(store.roleTemplatesById['template-1']).toBeUndefined()
   })
 
+  it('applies the default chat site to new roles', () => {
+    const store = createDefaultStore()
+    store.settings.defaultChatSite = 'chatgpt'
+    store.chatsById['chat-1'] = makeChat('chat-1')
+
+    const role = createGroupRole(store, { chatId: 'chat-1', name: '工程师', systemPrompt: '从工程角度分析' }, 'role-1', 1)
+
+    expect(role.chatSite).toBe('chatgpt')
+  })
+
   it('creates group roles in a validated batch without saving temporary people as templates', () => {
     const store = createDefaultStore()
     store.chatsById['chat-1'] = makeChat('chat-1')
     createRoleTemplate(store, { name: '工程师', systemPrompt: '从工程角度分析' }, 'template-1', 1)
 
     const roles = createGroupRolesBatch(store, 'chat-1', [
-      { source: 'library', roleTemplateId: 'template-1' },
-      { source: 'temporary', name: '法务', description: '关注合规', systemPrompt: '从法务角度分析' },
+      { source: 'library', roleTemplateId: 'template-1', chatSite: 'chatgpt' },
+      { source: 'temporary', name: '法务', description: '关注合规', systemPrompt: '从法务角度分析', chatSite: 'gemini' },
     ], () => `role-${store.chatsById['chat-1'].roleIds.length + 1}`, 2)
 
     expect(roles).toHaveLength(2)
-    expect(roles[0]).toMatchObject({ templateId: 'template-1', name: '工程师', systemPrompt: '从工程角度分析' })
-    expect(roles[1]).toMatchObject({ name: '法务', systemPrompt: '从法务角度分析' })
+    expect(roles[0]).toMatchObject({ templateId: 'template-1', name: '工程师', systemPrompt: '从工程角度分析', chatSite: 'chatgpt' })
+    expect(roles[1]).toMatchObject({ name: '法务', systemPrompt: '从法务角度分析', chatSite: 'gemini' })
     expect(roles[1].templateId).toBeUndefined()
     expect(store.roleTemplateOrder).toEqual(['template-1'])
     expect(Object.keys(store.roleTemplatesById)).toEqual(['template-1'])
@@ -81,6 +91,29 @@ describe('role template utilities', () => {
 
     expect(() => updateGroupRole(store, 'role-1', { systemPrompt: '修改后的人设' }, 2)).toThrow('群聊内人员人设不可编辑')
     expect(role.systemPrompt).toBe('从法务角度分析')
+  })
+
+  it('resets conversation bindings when a role switches chat site', () => {
+    const store = createDefaultStore()
+    store.chatsById['chat-1'] = makeChat('chat-1')
+    const role = createGroupRole(store, { chatId: 'chat-1', name: '法务', systemPrompt: '从法务角度分析' }, 'role-1', 1)
+    role.chatSite = 'gemini'
+    role.geminiConversationId = 'conv-1'
+    role.geminiConversationUrl = 'https://gemini.google.com/app/conv-1'
+    role.lastPromptMessageId = 'msg-1'
+    role.lastReplyAt = 10
+    role.contextCursor = 3
+    role.status = 'ready'
+
+    updateGroupRole(store, 'role-1', { chatSite: 'chatgpt' }, 2)
+
+    expect(role.chatSite).toBe('chatgpt')
+    expect(role.geminiConversationId).toBeUndefined()
+    expect(role.geminiConversationUrl).toBeUndefined()
+    expect(role.lastPromptMessageId).toBeUndefined()
+    expect(role.lastReplyAt).toBeUndefined()
+    expect(role.contextCursor).toBe(0)
+    expect(role.status).toBe('pending')
   })
 
   it('validates role names', () => {
@@ -259,6 +292,16 @@ describe('Gemini conversation URL utilities', () => {
     expect(extractGeminiConversationId('https://gemini.google.com/app/abc123/share')).toBe('abc123')
     expect(extractGeminiConversationId('https://gemini.google.com/app/%E6%B5%8B%E8%AF%95')).toBe('测试')
     expect(extractGeminiConversationId('https://gemini.google.com/')).toBeUndefined()
+  })
+
+  it('accepts safe ChatGPT URLs as supported chat conversation URLs', () => {
+    expect(isSafeSupportedChatUrl('https://chatgpt.com/c/abc123')).toBe(true)
+    expect(isSafeSupportedChatUrl('https://chat.openai.com/c/abc123')).toBe(true)
+    expect(isSafeSupportedChatUrl('https://chatgpt.com.evil.example/c/abc123')).toBe(false)
+    expect(getSafeSupportedChatUrl('https://chatgpt.com/c/abc123')).toBe('https://chatgpt.com/c/abc123')
+    expect(getSafeSupportedChatUrl('https://evil.example/c/abc123')).toBe('https://gemini.google.com/')
+    expect(extractSupportedConversationId('https://chatgpt.com/c/%E6%B5%8B%E8%AF%95')).toBe('测试')
+    expect(extractSupportedConversationId('https://chatgpt.com/')).toBeUndefined()
   })
 })
 

@@ -1,4 +1,4 @@
-import type { GroupChat, GroupRole, OpenTeamStore, RoleTemplate } from './types'
+import type { ChatSite, GroupChat, GroupRole, OpenTeamStore, RoleTemplate } from './types'
 
 export interface RoleTemplateInput {
   name: string
@@ -9,6 +9,7 @@ export interface RoleTemplateInput {
 export interface GroupRoleInput {
   chatId: string
   templateId?: string
+  chatSite?: ChatSite
   name?: string
   description?: string
   systemPrompt?: string
@@ -19,6 +20,7 @@ export type GroupRoleBatchInput =
   | {
       source: 'library'
       roleTemplateId: string
+      chatSite?: ChatSite
       avatarColor?: string
     }
   | {
@@ -26,6 +28,7 @@ export type GroupRoleBatchInput =
       name: string
       description?: string
       systemPrompt: string
+      chatSite?: ChatSite
       avatarColor?: string
     }
 
@@ -136,6 +139,7 @@ export function createGroupRole(
   const role: GroupRole = {
     id,
     chatId: input.chatId,
+    chatSite: input.chatSite ?? store.settings.defaultChatSite,
     name,
     status: 'pending',
     contextCursor: 0,
@@ -183,6 +187,15 @@ export function updateGroupRole(
     }
   }
   if (patch.systemPrompt !== undefined) throw new Error('群聊内人员人设不可编辑')
+  if (patch.chatSite !== undefined && patch.chatSite !== role.chatSite) {
+    role.chatSite = patch.chatSite
+    role.contextCursor = 0
+    role.status = 'pending'
+    delete role.geminiConversationId
+    delete role.geminiConversationUrl
+    delete role.lastPromptMessageId
+    delete role.lastReplyAt
+  }
   if (patch.avatarColor !== undefined) {
     const avatarColor = patch.avatarColor.trim()
     if (avatarColor) {
@@ -239,6 +252,7 @@ function prepareBatchItem(store: OpenTeamStore, item: GroupRoleBatchInput, index
     if (!template) throw new Error(`找不到人员库人员：${item.roleTemplateId}`)
     return {
       templateId: item.roleTemplateId,
+      chatSite: item.chatSite,
       name: assertValidRoleName(template.name, []),
       description: template.description,
       systemPrompt: assertValidSystemPrompt(template.systemPrompt),
@@ -248,6 +262,7 @@ function prepareBatchItem(store: OpenTeamStore, item: GroupRoleBatchInput, index
 
   if (item.source === 'temporary') {
     return {
+      chatSite: item.chatSite,
       name: assertValidRoleName(item.name, []),
       description: item.description,
       systemPrompt: assertValidSystemPrompt(item.systemPrompt),
