@@ -1,6 +1,8 @@
 import type { ChatSite, GroupRole, OpenTeamStore, RoleStatus } from '../group/types'
 import type { TeamPageState } from './appState'
 
+const VISIBLE_CHAT_SITES = ['gemini', 'chatgpt', 'claude', 'deepseek'] as const
+
 interface RolePanelIframeHost {
   recoverRole(role: GroupRole): void
 }
@@ -121,7 +123,7 @@ export function createRolePanelView(deps: RolePanelViewDependencies): RolePanelV
     const menu = document.createElement('div')
     menu.className = 'role-site-menu'
     menu.addEventListener('click', event => event.stopPropagation())
-    for (const site of ['gemini', 'chatgpt', 'claude', 'deepseek'] as const) {
+    for (const site of VISIBLE_CHAT_SITES) {
       const option = document.createElement('button')
       option.type = 'button'
       option.className = `role-site-option${role.chatSite === site ? ' active' : ''}`
@@ -169,6 +171,7 @@ function siteLabel(site: ChatSite | undefined): string {
   if (site === 'chatgpt') return 'ChatGPT'
   if (site === 'claude') return 'Claude'
   if (site === 'deepseek') return 'DeepSeek'
+  if (site === 'kimi') return 'Kimi'
   return 'Gemini'
 }
 

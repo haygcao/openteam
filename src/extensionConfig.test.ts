@@ -17,8 +17,26 @@ describe('extension security configuration', () => {
       'https://chat.openai.com/*',
       'https://claude.ai/*',
       'https://chat.deepseek.com/*',
+      'https://www.kimi.com/*',
     ])
     expect(manifest.host_permissions).not.toContain('<all_urls>')
+  })
+
+  it('loads the Kimi page-world bridge only on Kimi pages', () => {
+    const manifest = JSON.parse(readFileSync(resolve(process.cwd(), 'public/manifest.json'), 'utf8')) as {
+      content_scripts?: Array<{
+        matches?: string[]
+        js?: string[]
+        world?: string
+      }>
+    }
+
+    const bridgeScript = manifest.content_scripts?.find(script => script.js?.includes('kimiPageWorldBridge.js'))
+    expect(bridgeScript).toEqual(expect.objectContaining({
+      matches: ['*://www.kimi.com/*'],
+      js: ['kimiPageWorldBridge.js'],
+      world: 'MAIN',
+    }))
   })
 
   it('limits iframe header overrides to supported AI chat subframes', () => {
@@ -29,13 +47,14 @@ describe('extension security configuration', () => {
       }
     }>
 
-    expect(rules).toHaveLength(5)
+    expect(rules).toHaveLength(6)
     expect(rules.map(rule => rule.condition?.urlFilter)).toEqual([
       '||gemini.google.com/',
       '||chatgpt.com/',
       '||chat.openai.com/',
       '||claude.ai/',
       '||chat.deepseek.com/',
+      '||www.kimi.com/',
     ])
 
     for (const rule of rules) {

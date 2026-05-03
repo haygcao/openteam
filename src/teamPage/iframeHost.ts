@@ -416,12 +416,16 @@ export class IframeHost {
   private assignRole(record: RoleFrameRecord): void {
     record.assignmentAttempts += 1
     record.lastAssignedAt = Date.now()
-    record.iframe.contentWindow?.postMessage({
-      type: FRAME_ASSIGN_MESSAGE,
-      chatId: record.chatId,
-      roleId: record.roleId,
-      hostTabId: this.hostTabId,
-    } satisfies FrameAssignmentMessage, getSupportedChatOrigin(record.src))
+    try {
+      record.iframe.contentWindow?.postMessage({
+        type: FRAME_ASSIGN_MESSAGE,
+        chatId: record.chatId,
+        roleId: record.roleId,
+        hostTabId: this.hostTabId,
+      } satisfies FrameAssignmentMessage, getSupportedChatOrigin(record.src))
+    } catch {
+      return
+    }
     this.emit({ type: 'role-assigned', chatId: record.chatId, roleId: record.roleId, attempts: record.assignmentAttempts })
   }
 

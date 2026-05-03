@@ -1541,6 +1541,12 @@ select:focus {
   color: #a8bbff;
 }
 
+.site-pill-kimi {
+  border-color: rgba(54, 211, 153, 0.34);
+  background: rgba(54, 211, 153, 0.1);
+  color: #86efac;
+}
+
 .role-site-badge {
   display: inline-flex;
   align-items: center;

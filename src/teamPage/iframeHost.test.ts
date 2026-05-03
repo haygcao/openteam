@@ -127,6 +127,23 @@ describe('IframeHost', () => {
     expect(lastCall?.[1]).toBe('https://chat.deepseek.com')
   })
 
+  it('posts role assignments to the Kimi origin for Kimi role frames', () => {
+    const visibleHost = document.createElement('div')
+    document.body.append(visibleHost)
+    const host = createIframeHost({ visibleHost, assignIntervalMs: 50, hostTabId: 123 })
+
+    host.activateChat(makeChat('chat-1', ['role-1']), [{ ...makeRole('chat-1', 'role-1', 'https://www.kimi.com/chat/abc'), chatSite: 'kimi' }])
+
+    const iframe = host.getRoleFrame('chat-1', 'role-1')
+    expect(iframe?.src).toBe('https://www.kimi.com/chat/abc')
+
+    const postMessage = vi.spyOn(iframe!.contentWindow!, 'postMessage')
+    vi.advanceTimersByTime(120)
+
+    const lastCall = postMessage.mock.calls[postMessage.mock.calls.length - 1]
+    expect(lastCall?.[1]).toBe('https://www.kimi.com')
+  })
+
   it('uses safe ChatGPT conversation URLs for role frames', () => {
     const visibleHost = document.createElement('div')
     document.body.append(visibleHost)
@@ -155,6 +172,16 @@ describe('IframeHost', () => {
     host.activateChat(makeChat('chat-1', ['role-1']), [{ ...makeRole('chat-1', 'role-1', 'https://chat.deepseek.com/a/chat/s/restored'), chatSite: 'deepseek' }])
 
     expect(host.getRoleFrame('chat-1', 'role-1')?.src).toBe('https://chat.deepseek.com/a/chat/s/restored')
+  })
+
+  it('uses safe Kimi conversation URLs for role frames', () => {
+    const visibleHost = document.createElement('div')
+    document.body.append(visibleHost)
+    const host = createIframeHost({ visibleHost })
+
+    host.activateChat(makeChat('chat-1', ['role-1']), [{ ...makeRole('chat-1', 'role-1', 'https://www.kimi.com/chat/restored'), chatSite: 'kimi' }])
+
+    expect(host.getRoleFrame('chat-1', 'role-1')?.src).toBe('https://www.kimi.com/chat/restored')
   })
 
   it('mounts all active chat role iframes in that chat group', () => {
@@ -299,6 +326,23 @@ describe('IframeHost', () => {
 
     const lastCall = postMessage.mock.calls[postMessage.mock.calls.length - 1]
     expect(lastCall?.[0]).toEqual({ type: FRAME_ASSIGN_MESSAGE, chatId: 'chat-1', roleId: 'role-1', hostTabId: 456 })
+  })
+
+  it('ignores assignment postMessage attempts before the iframe navigates to the target origin', () => {
+    const visibleHost = document.createElement('div')
+    document.body.append(visibleHost)
+    const host = createIframeHost({ visibleHost, assignIntervalMs: 50 })
+    host.activateChat(makeChat('chat-1', ['role-1']), [{ ...makeRole('chat-1', 'role-1'), chatSite: 'kimi' }])
+    const iframe = host.getRoleFrame('chat-1', 'role-1')!
+    const postMessage = vi.spyOn(iframe.contentWindow!, 'postMessage').mockImplementation(() => {
+      throw new DOMException(
+        "Failed to execute 'postMessage' on 'DOMWindow': The target origin provided ('https://www.kimi.com') does not match the recipient window's origin ('chrome-extension://test').",
+      )
+    })
+
+    expect(() => vi.advanceTimersByTime(60)).not.toThrow()
+    expect(postMessage).toHaveBeenCalled()
+    expect(host.getChatState('chat-1')[0].assignmentAttempts).toBeGreaterThan(1)
   })
 
   it('keeps previously activated chat groups visible in the iframe host when switching chats', () => {

@@ -7,6 +7,7 @@ type AddPersonItem =
   | { key: string; source: 'temporary'; draftId: string; name: string; description?: string; systemPrompt: string; chatSite: ChatSite }
 
 const PEOPLE_LIBRARY_PAGE_SIZE = 8
+const VISIBLE_CHAT_SITES = ['gemini', 'chatgpt', 'claude', 'deepseek'] as const
 
 export interface PeopleLibraryViewDependencies {
   state: TeamPageState
@@ -33,6 +34,7 @@ export interface PeopleLibraryViewDependencies {
   templateSiteChatGptEl: HTMLInputElement
   templateSiteClaudeEl: HTMLInputElement
   templateSiteDeepSeekEl: HTMLInputElement
+  templateSiteKimiEl: HTMLInputElement
   temporaryPersonNameEl: HTMLInputElement
   temporaryPersonDescriptionEl: HTMLTextAreaElement
   temporaryPersonPromptEl: HTMLTextAreaElement
@@ -92,7 +94,7 @@ export function createPeopleLibraryView(deps: PeopleLibraryViewDependencies): Pe
     const selectedTemplate = deps.state.selectedTemplateId ? store.roleTemplatesById[deps.state.selectedTemplateId] : undefined
     deps.templateFormTitleEl.textContent = selectedTemplate ? `编辑人员：${selectedTemplate.name}` : '新建人员'
     if (selectedTemplate) {
-      const defaultChatSite = selectedTemplate.defaultChatSite ?? store.settings.defaultChatSite
+      const defaultChatSite = visibleChatSite(selectedTemplate.defaultChatSite ?? store.settings.defaultChatSite)
       deps.templateNameEl.value = selectedTemplate.name
       deps.templateDescriptionEl.value = selectedTemplate.description ?? ''
       deps.templatePromptEl.value = selectedTemplate.systemPrompt
@@ -100,14 +102,17 @@ export function createPeopleLibraryView(deps: PeopleLibraryViewDependencies): Pe
       deps.templateSiteChatGptEl.checked = defaultChatSite === 'chatgpt'
       deps.templateSiteClaudeEl.checked = defaultChatSite === 'claude'
       deps.templateSiteDeepSeekEl.checked = defaultChatSite === 'deepseek'
+      deps.templateSiteKimiEl.checked = false
     } else {
       deps.templateNameEl.value = ''
       deps.templateDescriptionEl.value = ''
       deps.templatePromptEl.value = ''
-      deps.templateSiteGeminiEl.checked = store.settings.defaultChatSite === 'gemini'
-      deps.templateSiteChatGptEl.checked = store.settings.defaultChatSite === 'chatgpt'
-      deps.templateSiteClaudeEl.checked = store.settings.defaultChatSite === 'claude'
-      deps.templateSiteDeepSeekEl.checked = store.settings.defaultChatSite === 'deepseek'
+      const defaultChatSite = visibleChatSite(store.settings.defaultChatSite)
+      deps.templateSiteGeminiEl.checked = defaultChatSite === 'gemini'
+      deps.templateSiteChatGptEl.checked = defaultChatSite === 'chatgpt'
+      deps.templateSiteClaudeEl.checked = defaultChatSite === 'claude'
+      deps.templateSiteDeepSeekEl.checked = defaultChatSite === 'deepseek'
+      deps.templateSiteKimiEl.checked = false
     }
   }
 
@@ -207,8 +212,9 @@ export function createPeopleLibraryView(deps: PeopleLibraryViewDependencies): Pe
       }
       const id = `temporary-${Date.now()}-${Math.random().toString(16).slice(2)}`
       const store = deps.getStore()
-      deps.state.temporaryPersonDrafts.push({ id, ...draft, chatSite: store.settings.defaultChatSite })
-      deps.state.addPersonSiteByKey.set(`temporary:${id}`, store.settings.defaultChatSite)
+      const chatSite = visibleChatSite(store.settings.defaultChatSite)
+      deps.state.temporaryPersonDrafts.push({ id, ...draft, chatSite })
+      deps.state.addPersonSiteByKey.set(`temporary:${id}`, chatSite)
       closeTemporaryPersonDialog()
       renderAddPersonDialog()
     })
@@ -251,7 +257,7 @@ export function createPeopleLibraryView(deps: PeopleLibraryViewDependencies): Pe
     description.textContent = template.description || '未填写人员库描述'
     const site = document.createElement('div')
     site.className = 'template-description'
-    site.textContent = `默认站点：${siteLabel(template.defaultChatSite ?? store.settings.defaultChatSite)}`
+    site.textContent = `默认站点：${siteLabel(visibleChatSite(template.defaultChatSite ?? store.settings.defaultChatSite))}`
     body.append(row, description, site)
 
     const edit = document.createElement('button')
@@ -350,7 +356,7 @@ export function createPeopleLibraryView(deps: PeopleLibraryViewDependencies): Pe
     const store = deps.getStore()
     const libraryItems = deps.getTemplates().map(template => {
       const key = `library:${template.id}`
-      const chatSite = deps.state.addPersonSiteByKey.get(key) ?? template.defaultChatSite ?? store.settings.defaultChatSite
+      const chatSite = visibleChatSite(deps.state.addPersonSiteByKey.get(key) ?? template.defaultChatSite ?? store.settings.defaultChatSite)
       deps.state.addPersonSiteByKey.set(key, chatSite)
       return {
         key,
@@ -363,7 +369,7 @@ export function createPeopleLibraryView(deps: PeopleLibraryViewDependencies): Pe
     })
     const temporaryItems = deps.state.temporaryPersonDrafts.map(draft => {
       const key = `temporary:${draft.id}`
-      const chatSite = deps.state.addPersonSiteByKey.get(key) ?? draft.chatSite
+      const chatSite = visibleChatSite(deps.state.addPersonSiteByKey.get(key) ?? draft.chatSite)
       deps.state.addPersonSiteByKey.set(key, chatSite)
       return {
         key,
@@ -401,7 +407,7 @@ export function createPeopleLibraryView(deps: PeopleLibraryViewDependencies): Pe
     const menu = document.createElement('div')
     menu.className = 'role-site-menu'
     menu.addEventListener('click', event => event.stopPropagation())
-    for (const site of ['gemini', 'chatgpt', 'claude', 'deepseek'] as const) {
+    for (const site of VISIBLE_CHAT_SITES) {
       const option = document.createElement('button')
       option.type = 'button'
       option.className = `role-site-option${currentSite === site ? ' active' : ''}`
@@ -480,5 +486,10 @@ function siteLabel(site: ChatSite | undefined): string {
   if (site === 'chatgpt') return 'ChatGPT'
   if (site === 'claude') return 'Claude'
   if (site === 'deepseek') return 'DeepSeek'
+  if (site === 'kimi') return 'Kimi'
   return 'Gemini'
+}
+
+function visibleChatSite(site: ChatSite | undefined): ChatSite {
+  return site && VISIBLE_CHAT_SITES.includes(site as typeof VISIBLE_CHAT_SITES[number]) ? site : 'gemini'
 }

@@ -58,6 +58,7 @@ describe('team page dom refs', () => {
       <input id="template-site-chatgpt" />
       <input id="template-site-claude" />
       <input id="template-site-deepseek" />
+      <input id="template-site-kimi" />
       <input id="temporary-person-name" />
       <textarea id="temporary-person-description"></textarea>
       <textarea id="temporary-person-prompt"></textarea>

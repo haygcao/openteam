@@ -341,7 +341,9 @@ function normalizeSettings(raw: unknown): OpenTeamSettings {
           ? 'claude'
           : raw.defaultChatSite === 'deepseek'
             ? 'deepseek'
-            : DEFAULT_SETTINGS.defaultChatSite,
+            : raw.defaultChatSite === 'kimi'
+              ? 'kimi'
+              : DEFAULT_SETTINGS.defaultChatSite,
   }
 }
 

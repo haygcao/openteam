@@ -28,7 +28,7 @@ const { templateNameEl, templateDescriptionEl, templatePromptEl, templateFormTit
 const { openPeopleLibraryEl, closePeopleLibraryEl, peopleLibraryModalEl, personTemplateModalEl, addPersonModalEl, temporaryPersonModalEl } = teamDomRefs
 const { peopleLibrarySummaryEl, peopleLibraryListEl, peopleLibraryPaginationEl, addLibraryPeopleListEl, newTemplateEl, closePersonTemplateEl, closeAddPersonEl } = teamDomRefs
 const { openTemporaryPersonEl, closeTemporaryPersonEl, addRoleFormEl, addLibraryPeopleFormEl, addTemporaryPersonFormEl, peopleLibraryFormEl } = teamDomRefs
-const { templateSiteGeminiEl, templateSiteChatGptEl, templateSiteClaudeEl, templateSiteDeepSeekEl, temporaryPersonNameEl, temporaryPersonDescriptionEl, temporaryPersonPromptEl } = teamDomRefs
+const { templateSiteGeminiEl, templateSiteChatGptEl, templateSiteClaudeEl, templateSiteDeepSeekEl, templateSiteKimiEl, temporaryPersonNameEl, temporaryPersonDescriptionEl, temporaryPersonPromptEl } = teamDomRefs
 const { togglePeopleDrawerEl, rolePanelEl, windowLauncherEl } = teamDomRefs
 const log = teamPageLog
 const showError = createErrorPresenter(errorEl)
@@ -172,6 +172,7 @@ const peopleLibraryView = createPeopleLibraryView({
   templateSiteChatGptEl,
   templateSiteClaudeEl,
   templateSiteDeepSeekEl,
+  templateSiteKimiEl,
   temporaryPersonNameEl,
   temporaryPersonDescriptionEl,
   temporaryPersonPromptEl,
