@@ -181,10 +181,14 @@ export function createComposerView(deps: ComposerViewDependencies): ComposerView
 
     const reference = deps.state.selectedReference
     const reconnectableRoles = targetResult.roles.filter(role => role.status !== 'ready' && shouldAutoReconnectRole(role))
-    if (reconnectableRoles.length > 0) await deps.reconnectRolesForSend(chat, reconnectableRoles)
-
-    await sendMessageAfterReconnect(chat, raw, reference, targetResult.roles)
     clearComposerAfterSend(raw, reference)
+    try {
+      if (reconnectableRoles.length > 0) await deps.reconnectRolesForSend(chat, reconnectableRoles)
+      await sendMessageAfterReconnect(chat, raw, reference, targetResult.roles)
+    } catch (error) {
+      restoreComposerDraft(raw, reference)
+      throw error
+    }
   }
 
   async function sendMessageAfterReconnect(chat: GroupChat, raw: string, reference: MessageReference | undefined, targetRoles: GroupRole[], retryOnUnavailable = true): Promise<void> {
@@ -203,6 +207,12 @@ export function createComposerView(deps: ComposerViewDependencies): ComposerView
   function clearComposerAfterSend(raw: string, reference: MessageReference | undefined): void {
     if (deps.messageInputEl.value.trim() === raw) deps.messageInputEl.value = ''
     if (deps.state.selectedReference === reference) deps.state.selectedReference = undefined
+    renderComposerState()
+  }
+
+  function restoreComposerDraft(raw: string, reference: MessageReference | undefined): void {
+    if (!deps.messageInputEl.value.trim()) deps.messageInputEl.value = raw
+    if (!deps.state.selectedReference) deps.state.selectedReference = reference
     renderComposerState()
   }
 
