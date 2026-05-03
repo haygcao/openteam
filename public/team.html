@@ -1108,17 +1108,70 @@
 
       .message-tools {
         display: flex;
-        justify-content: flex-end;
-        gap: 6px;
-        margin-top: -2px;
+        justify-content: flex-start;
+        gap: 4px;
+        margin-top: -4px;
         padding: 0 8px 7px;
-        opacity: 0;
-        transition: opacity 0.16s ease;
       }
 
-      .message-row.assistant:hover .message-tools,
-      .message-row.assistant:focus-within .message-tools {
+      .message-tool-btn {
+        position: relative;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 30px;
+        height: 30px;
+        border: 0;
+        border-radius: 6px;
+        background: transparent;
+        color: currentColor;
+        opacity: 0.58;
+        cursor: pointer;
+        transition: opacity 0.14s ease, background 0.14s ease;
+      }
+
+      .message-tool-btn::after {
+        content: attr(aria-label);
+        position: absolute;
+        left: 50%;
+        top: calc(100% + 7px);
+        z-index: 3;
+        transform: translate(-50%, 4px);
+        border: 1px solid rgba(128, 151, 171, 0.22);
+        border-radius: 6px;
+        padding: 4px 7px;
+        background: rgba(9, 15, 24, 0.96);
+        color: var(--text);
+        box-shadow: 0 8px 18px rgba(0, 0, 0, 0.28);
+        font-size: 12px;
+        line-height: 1.2;
+        white-space: nowrap;
+        opacity: 0;
+        pointer-events: none;
+        transition: opacity 0.14s ease, transform 0.14s ease;
+      }
+
+      .message-tool-btn:hover,
+      .message-tool-btn:focus-visible {
+        background: rgba(255, 255, 255, 0.08);
+        opacity: 0.96;
+      }
+
+      .message-tool-btn.copied {
+        color: var(--success);
         opacity: 1;
+      }
+
+      .message-tool-btn:hover::after,
+      .message-tool-btn:focus-visible::after {
+        transform: translate(-50%, 0);
+        opacity: 1;
+      }
+
+      .message-tool-btn svg {
+        width: 18px;
+        height: 18px;
+        fill: currentColor;
       }
 
       .composer {

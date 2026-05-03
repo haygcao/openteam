@@ -27,9 +27,11 @@ type TemporaryPersonDraft = Pick<RoleTemplate, 'name' | 'description' | 'systemP
 type AddPersonItem =
   | { key: string; source: 'library'; roleTemplateId: string; name: string; description?: string; chatSite: ChatSite }
   | { key: string; source: 'temporary'; draftId: string; name: string; description?: string; systemPrompt: string; chatSite: ChatSite }
+type MessageActionIcon = 'copy' | 'quote' | 'jump' | 'check'
 
 const MAX_CACHED_MESSAGE_NODES = 400
 const AUTO_RECONNECT_TIMEOUT_MS = 20_000
+const COPY_FEEDBACK_MS = 1200
 const markdownRenderer = new MarkdownIt({ html: false, linkify: true, breaks: true })
 
 interface RoleReadyWaiter {
@@ -593,19 +595,10 @@ function renderMessageNode(message: GroupMessage, showName = true, showAvatar = 
     const tools = document.createElement('div')
     tools.className = 'message-tools'
     if (message.roleId) {
-      const jump = document.createElement('button')
-      jump.type = 'button'
-      jump.className = 'btn btn-ghost'
-      jump.textContent = '跳转'
-      jump.addEventListener('click', () => focusRoleFrame(message.chatId, message.roleId))
-      tools.append(jump)
+      tools.append(createMessageIconButton('跳转到原始窗口', 'jump', () => focusRoleFrame(message.chatId, message.roleId)))
     }
-    const quote = document.createElement('button')
-    quote.type = 'button'
-    quote.className = 'btn btn-ghost'
-    quote.textContent = '引用'
-    quote.addEventListener('click', () => setReference(message))
-    tools.append(quote)
+    tools.append(createMessageIconButton('引用回复', 'quote', () => setReference(message)))
+    tools.append(createMessageIconButton('复制回复', 'copy', button => handleCopyMessage(button, message)))
     bubble.append(tools)
   }
 
@@ -636,6 +629,64 @@ function renderMarkdownMessageBody(body: HTMLElement, content: string): void {
 
 function renderPlainMessageBody(body: HTMLElement, content: string): void {
   body.append(document.createTextNode(content))
+}
+
+function createMessageIconButton(label: string, icon: MessageActionIcon, onClick: (button: HTMLButtonElement) => void): HTMLButtonElement {
+  const button = document.createElement('button')
+  button.type = 'button'
+  button.className = 'message-tool-btn'
+  button.setAttribute('aria-label', label)
+  setMessageButtonIcon(button, icon)
+  button.addEventListener('click', () => onClick(button))
+  return button
+}
+
+function setMessageButtonIcon(button: HTMLButtonElement, icon: MessageActionIcon): void {
+  button.replaceChildren(messageActionIcon(icon))
+}
+
+function messageActionIcon(icon: MessageActionIcon): SVGSVGElement {
+  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg')
+  svg.setAttribute('viewBox', '0 0 24 24')
+  svg.setAttribute('aria-hidden', 'true')
+  svg.setAttribute('focusable', 'false')
+
+  const path = document.createElementNS('http://www.w3.org/2000/svg', 'path')
+  path.setAttribute('d', messageActionIconPath(icon))
+  svg.append(path)
+  return svg
+}
+
+function messageActionIconPath(icon: MessageActionIcon): string {
+  if (icon === 'copy') return 'M8 7.5A2.5 2.5 0 0 1 10.5 5h6A2.5 2.5 0 0 1 19 7.5v6A2.5 2.5 0 0 1 16.5 16h-6A2.5 2.5 0 0 1 8 13.5v-6Zm-3 3A2.5 2.5 0 0 1 7.5 8H8v5.5a2.5 2.5 0 0 0 2.5 2.5H16v.5a2.5 2.5 0 0 1-2.5 2.5h-6A2.5 2.5 0 0 1 5 16.5v-6Z'
+  if (icon === 'quote') return 'M7.2 6.5c-1.7 1.4-2.7 3-2.7 5.1 0 1.9 1.1 3.2 2.8 3.2 1.3 0 2.3-.9 2.3-2.2 0-1.2-.8-2-2-2.1.2-1.1.9-2 2.1-3l-1.1-1.4c-.5.1-1 .2-1.4.4Zm8 0c-1.7 1.4-2.7 3-2.7 5.1 0 1.9 1.1 3.2 2.8 3.2 1.3 0 2.3-.9 2.3-2.2 0-1.2-.8-2-2-2.1.2-1.1.9-2 2.1-3l-1.1-1.4c-.5.1-1 .2-1.4.4Z'
+  if (icon === 'check') return 'M9.2 16.4 4.8 12l1.4-1.4 3 3 8.6-8.6 1.4 1.4-10 10Z'
+  return 'M14 5h5v5h-1.6V7.7l-7.1 7.1-1.1-1.1 7.1-7.1H14V5ZM6.5 6h4v1.6h-4a.9.9 0 0 0-.9.9v9a.9.9 0 0 0 .9.9h9a.9.9 0 0 0 .9-.9v-4H18v4A2.5 2.5 0 0 1 15.5 20h-9A2.5 2.5 0 0 1 4 17.5v-9A2.5 2.5 0 0 1 6.5 6Z'
+}
+
+async function handleCopyMessage(button: HTMLButtonElement, message: GroupMessage): Promise<void> {
+  try {
+    await copyMessageContent(message)
+    showCopyFeedback(button)
+  } catch (error) {
+    showError(error instanceof Error ? error.message : String(error))
+  }
+}
+
+function showCopyFeedback(button: HTMLButtonElement): void {
+  button.classList.add('copied')
+  button.setAttribute('aria-label', '已复制')
+  setMessageButtonIcon(button, 'check')
+  window.setTimeout(() => {
+    button.classList.remove('copied')
+    button.setAttribute('aria-label', '复制回复')
+    setMessageButtonIcon(button, 'copy')
+  }, COPY_FEEDBACK_MS)
+}
+
+async function copyMessageContent(message: GroupMessage): Promise<void> {
+  if (!navigator.clipboard?.writeText) throw new Error('当前浏览器不支持复制')
+  await navigator.clipboard.writeText(message.content)
 }
 
 function messageSignature(message: GroupMessage, showName = true, showAvatar = true): string {
