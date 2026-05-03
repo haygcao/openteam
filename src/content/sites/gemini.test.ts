@@ -96,4 +96,20 @@ describe('Gemini site adapter', () => {
     expect(copied).toBe('标题\n\n```ts\nconst answer = 42\n```')
     expect(clipboardText).toBe('用户原来的剪贴板')
   })
+
+  it('converts Gemini reply DOM to markdown when copy output is unavailable', () => {
+    document.body.innerHTML = `
+      <model-response>
+        <message-content>
+          <h2>方案</h2>
+          <p><strong>结论</strong>：可以做</p>
+          <ul><li>先做复制</li><li>再做兜底</li></ul>
+          <pre><code>const ok = true</code></pre>
+        </message-content>
+      </model-response>
+    `
+    const response = document.querySelector('message-content')!
+
+    expect(createGeminiAdapter().readResponseMarkdown?.(response)).toBe('## 方案\n\n**结论**：可以做\n\n- 先做复制\n- 再做兜底\n\n```\nconst ok = true\n```')
+  })
 })

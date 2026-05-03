@@ -1,5 +1,6 @@
 import type { ChatSiteAdapter, ConversationSnapshot } from './types'
 import { keepDeepestResponseContainers } from '../responseContainers'
+import { extractMarkdownFromDom } from './domMarkdown'
 
 const CHATGPT_HOSTS = new Set(['chatgpt.com', 'chat.openai.com'])
 const DEFAULT_INPUT_TIMEOUT_MS = 9000
@@ -88,6 +89,7 @@ export function createChatGptAdapter(options: ChatGptAdapterOptions = {}): ChatS
     getAllAssistantReplies,
     readResponseText: extractCleanText,
     readResponseTextFromCopy: node => readResponseTextFromCopy(node, clipboardTimeoutMs, clipboardPollMs),
+    readResponseMarkdown: extractMarkdownFromDom,
     findResponseContainer,
     isGenerating: isChatGptGenerating,
     fillAndSend,

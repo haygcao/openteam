@@ -72,4 +72,55 @@ describe('Claude site adapter', () => {
 
     expect(createClaudeAdapter().getAllAssistantReplies()).toEqual(['我能做很多事情！\n\n写作\n编程'])
   })
+
+  it('uses the Claude copy action to read markdown replies and restores the clipboard', async () => {
+    let clipboardText = '用户原来的剪贴板'
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: {
+        readText: vi.fn(async () => clipboardText),
+        writeText: vi.fn(async (text: string) => {
+          clipboardText = text
+        }),
+      },
+    })
+    document.body.innerHTML = `
+      <div class="group">
+        <div class="font-claude-response">
+          <div class="standard-markdown">
+            <p>标题</p>
+            <pre><code>const answer = 42</code></pre>
+          </div>
+        </div>
+        <div role="group" aria-label="Message actions">
+          <button type="button" data-testid="action-bar-copy" aria-label="Copy">Copy</button>
+        </div>
+      </div>
+    `
+    document.querySelector<HTMLButtonElement>('[data-testid="action-bar-copy"]')?.addEventListener('click', () => {
+      clipboardText = '标题\n\n```ts\nconst answer = 42\n```'
+    })
+    const response = document.querySelector('.font-claude-response')!
+
+    const copied = await createClaudeAdapter({ clipboardPollMs: 5, clipboardTimeoutMs: 50 }).readResponseTextFromCopy?.(response)
+
+    expect(copied).toBe('标题\n\n```ts\nconst answer = 42\n```')
+    expect(clipboardText).toBe('用户原来的剪贴板')
+  })
+
+  it('converts Claude reply DOM to markdown when copy output is unavailable', () => {
+    document.body.innerHTML = `
+      <div class="font-claude-response">
+        <div class="standard-markdown">
+          <h2>方案</h2>
+          <p><strong>结论</strong>：可以做</p>
+          <ul><li>先做复制</li><li>再做兜底</li></ul>
+          <pre><code>const ok = true</code></pre>
+        </div>
+      </div>
+    `
+    const response = document.querySelector('.font-claude-response')!
+
+    expect(createClaudeAdapter().readResponseMarkdown?.(response)).toBe('## 方案\n\n**结论**：可以做\n\n- 先做复制\n- 再做兜底\n\n```\nconst ok = true\n```')
+  })
 })

@@ -111,4 +111,20 @@ describe('ChatGPT site adapter', () => {
     expect(copied).toBe('标题\n\n```ts\nconst answer = 42\n```')
     expect(clipboardText).toBe('用户原来的剪贴板')
   })
+
+  it('converts ChatGPT reply DOM to markdown when copy output is unavailable', () => {
+    document.body.innerHTML = `
+      <div data-message-author-role="assistant">
+        <div class="markdown">
+          <h2>方案</h2>
+          <p><strong>结论</strong>：可以做</p>
+          <ul><li>先做复制</li><li>再做兜底</li></ul>
+          <pre><code>const ok = true</code></pre>
+        </div>
+      </div>
+    `
+    const response = document.querySelector('[data-message-author-role="assistant"]')!
+
+    expect(createChatGptAdapter().readResponseMarkdown?.(response)).toBe('## 方案\n\n**结论**：可以做\n\n- 先做复制\n- 再做兜底\n\n```\nconst ok = true\n```')
+  })
 })

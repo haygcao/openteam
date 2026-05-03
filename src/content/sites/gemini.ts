@@ -1,5 +1,6 @@
 import type { ChatSiteAdapter, ConversationSnapshot } from './types'
 import { keepDeepestResponseContainers } from '../responseContainers'
+import { extractMarkdownFromDom } from './domMarkdown'
 
 const GEMINI_ORIGIN = 'https://gemini.google.com'
 const GEMINI_HOME_URL = `${GEMINI_ORIGIN}/`
@@ -97,6 +98,7 @@ export function createGeminiAdapter(options: GeminiAdapterOptions = {}): ChatSit
     getAllAssistantReplies,
     readResponseText: extractCleanText,
     readResponseTextFromCopy: node => readResponseTextFromCopy(node, clipboardTimeoutMs, clipboardPollMs),
+    readResponseMarkdown: extractMarkdownFromDom,
     findResponseContainer,
     isGenerating: isGeminiGenerating,
     fillAndSend,

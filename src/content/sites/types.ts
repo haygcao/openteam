@@ -11,6 +11,7 @@ export interface ChatSiteAdapter {
   getAllAssistantReplies(): string[]
   readResponseText(node: Node): string
   readResponseTextFromCopy?(node: Node): Promise<string | undefined>
+  readResponseMarkdown?(node: Node): string
   findResponseContainer(element: Element | null): Element | null
   isGenerating(): boolean
   fillAndSend(content: string, autoSend?: boolean): Promise<void>

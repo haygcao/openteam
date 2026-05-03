@@ -1,14 +1,19 @@
 import type { ChatSiteAdapter, ConversationSnapshot } from './types'
 import { keepDeepestResponseContainers } from '../responseContainers'
+import { extractMarkdownFromDom } from './domMarkdown'
 
 const CLAUDE_HOSTS = new Set(['claude.ai'])
 const DEFAULT_INPUT_TIMEOUT_MS = 9000
+const DEFAULT_CLIPBOARD_TIMEOUT_MS = 900
+const DEFAULT_CLIPBOARD_POLL_MS = 40
 
 const CLAUDE_SELECTORS = {
   editor: '[data-testid="chat-input"][contenteditable="true"], div[contenteditable="true"][aria-label*="Claude"]',
   sendButton:
     'button[aria-label*="Send"], button[aria-label*="发送"], button[aria-label*="Submit"], button[aria-label*="发送消息"]',
   response: '.font-claude-response',
+  copyButton:
+    'button[data-testid="action-bar-copy"], [role="group"][aria-label="Message actions"] button[aria-label="Copy"], button[aria-label="Copy"], button[aria-label="复制"]',
 }
 
 const BLOCK_TAGS = new Set([
@@ -32,10 +37,14 @@ const SKIP_TAGS = new Set(['SCRIPT', 'STYLE', 'BUTTON', 'TEXTAREA', 'SVG'])
 interface ClaudeAdapterOptions {
   href?: string
   inputTimeoutMs?: number
+  clipboardTimeoutMs?: number
+  clipboardPollMs?: number
 }
 
 export function createClaudeAdapter(options: ClaudeAdapterOptions = {}): ChatSiteAdapter {
   const inputTimeoutMs = options.inputTimeoutMs ?? DEFAULT_INPUT_TIMEOUT_MS
+  const clipboardTimeoutMs = options.clipboardTimeoutMs ?? DEFAULT_CLIPBOARD_TIMEOUT_MS
+  const clipboardPollMs = options.clipboardPollMs ?? DEFAULT_CLIPBOARD_POLL_MS
 
   function currentHref(): string {
     return options.href ?? location.href
@@ -78,6 +87,8 @@ export function createClaudeAdapter(options: ClaudeAdapterOptions = {}): ChatSit
     getResponseContainers,
     getAllAssistantReplies,
     readResponseText: extractCleanText,
+    readResponseTextFromCopy: node => readResponseTextFromCopy(node, clipboardTimeoutMs, clipboardPollMs),
+    readResponseMarkdown: extractMarkdownFromDom,
     findResponseContainer,
     isGenerating: isClaudeGenerating,
     fillAndSend,
@@ -245,6 +256,73 @@ function findResponseContainer(element: Element | null): Element | null {
   }
 
   return null
+}
+
+async function readResponseTextFromCopy(node: Node, timeoutMs: number, pollMs: number): Promise<string | undefined> {
+  if (node.nodeType !== Node.ELEMENT_NODE) return undefined
+
+  const copyButton = findCopyButton(node as Element)
+  const clipboard = navigator.clipboard
+  if (!copyButton || !clipboard?.readText) return undefined
+
+  let previousText: string | undefined
+  try {
+    previousText = await clipboard.readText()
+  } catch {
+    previousText = undefined
+  }
+
+  try {
+    copyButton.click()
+    const copiedText = await waitForClipboardText(previousText, timeoutMs, pollMs)
+    return copiedText?.trim() || undefined
+  } catch {
+    return undefined
+  } finally {
+    if (previousText !== undefined && clipboard.writeText) {
+      clipboard.writeText(previousText).catch(() => undefined)
+    }
+  }
+}
+
+function findCopyButton(response: Element): HTMLButtonElement | undefined {
+  let scope: Element | null = response
+  while (scope && scope !== document.body) {
+    const copyButton = scope.querySelector<HTMLButtonElement>(CLAUDE_SELECTORS.copyButton)
+    if (copyButton && isClickableButton(copyButton)) return copyButton
+    scope = scope.parentElement
+  }
+
+  const copyButton = document.querySelector<HTMLButtonElement>(CLAUDE_SELECTORS.copyButton)
+  return copyButton && isClickableButton(copyButton) ? copyButton : undefined
+}
+
+function waitForClipboardText(previousText: string | undefined, timeoutMs: number, pollMs: number): Promise<string | undefined> {
+  const clipboard = navigator.clipboard
+  if (!clipboard?.readText) return Promise.resolve(undefined)
+
+  return new Promise(resolve => {
+    const startedAt = Date.now()
+    const timer = window.setInterval(() => {
+      clipboard.readText()
+        .then(text => {
+          const trimmed = text.trim()
+          if (trimmed && (previousText === undefined || text !== previousText)) {
+            window.clearInterval(timer)
+            resolve(text)
+            return
+          }
+          if (Date.now() - startedAt >= timeoutMs) {
+            window.clearInterval(timer)
+            resolve(undefined)
+          }
+        })
+        .catch(() => {
+          window.clearInterval(timer)
+          resolve(undefined)
+        })
+    }, pollMs)
+  })
 }
 
 function isClaudeGenerating(): boolean {

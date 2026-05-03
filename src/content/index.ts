@@ -202,6 +202,8 @@ async function resolveReportableReplyText(element: Element, fallbackText: string
   const copiedText = await siteAdapter.readResponseTextFromCopy?.(element)
   const trimmedCopiedText = copiedText?.trim()
   if (trimmedCopiedText) return { text: trimmedCopiedText, contentFormat: 'markdown' }
+  const markdownText = siteAdapter.readResponseMarkdown?.(element).trim()
+  if (markdownText) return { text: markdownText, contentFormat: 'markdown' }
   return { text: fallbackText }
 }
 
