@@ -1,4 +1,5 @@
 import type { OpenTeamStore } from '../group/types'
+import { createLogger } from '../shared/logger'
 
 export type RuntimeMessage = { type?: string; [key: string]: unknown }
 
@@ -10,11 +11,7 @@ export const GROUP_PUSH_TYPE = 'OPENTEAM_GROUP_PUSH'
 
 const hostTabIds = new Set<number>()
 
-const log = {
-  debug(event: string, details?: Record<string, unknown>): void {
-    console.debug('[OpenTeam][background]', event, details || {})
-  },
-}
+const log = createLogger('background')
 
 export function senderTabId(sender: chrome.runtime.MessageSender): number | undefined {
   return sender.tab?.id

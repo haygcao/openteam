@@ -14,23 +14,10 @@ import { createPromptSender } from './promptDelivery'
 import { createRoleHandlers } from './roleHandlers'
 import { createRuntimeFrameRegistry } from './runtimeFrames'
 import { getChatRoles, mutateStore } from './storeAccess'
+import { createLogger } from '../shared/logger'
 
 const runtimeFrames = createRuntimeFrameRegistry()
-
-const log = {
-  debug(event: string, details?: Record<string, unknown>): void {
-    console.debug('[OpenTeam][background]', event, details || {})
-  },
-  info(event: string, details?: Record<string, unknown>): void {
-    console.info('[OpenTeam][background]', event, details || {})
-  },
-  warn(event: string, details?: Record<string, unknown>): void {
-    console.warn('[OpenTeam][background]', event, details || {})
-  },
-  error(event: string, details?: Record<string, unknown>): void {
-    console.error('[OpenTeam][background]', event, details || {})
-  },
-}
+const log = createLogger('background')
 
 const sendPrompt = createPromptSender({ log })
 

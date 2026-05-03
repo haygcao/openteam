@@ -198,7 +198,38 @@ npm run build
 npm run verify
 ```
 
-`verify` 会依次执行 TypeScript 类型检查、测试和生产构建，建议每轮重构结束后都跑一遍。
+`verify` 会依次执行 TypeScript 类型检查、单元测试、E2E harness 和生产构建，建议每轮重构结束后都跑一遍。
+
+验证已安装的浏览器插件，并用 Chrome 打开 `team.html` 做 smoke test：
+
+```bash
+OPENTEAM_EXTENSION_ID="<extension-id>" \
+CHROME_USER_DATA_DIR="$HOME/Library/Application Support/Google/Chrome" \
+npm run e2e:extension
+```
+
+如果 Chrome 已经以 remote debugging 方式启动，也可以直接连接现有浏览器：
+
+```bash
+OPENTEAM_EXTENSION_ID="<extension-id>" \
+OPENTEAM_CDP_URL="http://127.0.0.1:9222" \
+npm run e2e:extension
+```
+
+如果 Chrome 不在默认路径，可以指定：
+
+```bash
+CHROME_PATH="/path/to/chrome" \
+OPENTEAM_EXTENSION_ID="<extension-id>" \
+CHROME_USER_DATA_DIR="/path/to/chrome-profile-root" \
+npm run e2e:extension
+```
+
+开发调试时也可以临时加载构建后的 unpacked extension，但发布前仍建议按上面的“已安装插件”方式验收：
+
+```bash
+OPENTEAM_LOAD_UNPACKED=1 npm run e2e:extension
+```
 
 构建产物在 `dist/`：
 
@@ -237,6 +268,12 @@ npm run typecheck
 npm test
 ```
 
+运行 E2E harness：
+
+```bash
+npm run test:e2e
+```
+
 ## 依赖安全
 
 当前已执行非破坏性 `npm audit fix`，可自动修复的 PostCSS/Rollup 风险已处理。
@@ -250,6 +287,8 @@ npm test
 - iframe 角色的 `frameId` 路由
 - 回复去重
 - 回复超时
+- E2E 主链路、人员恢复与重试
+- 已安装扩展页 smoke
 - Gemini 输入写入工具
 - 旧 tab 唤醒调度器
 

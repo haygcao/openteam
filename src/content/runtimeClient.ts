@@ -1,24 +1,11 @@
 import type { BackgroundToRoleMessage, RoleToBackgroundMessage } from '../group/runtimeProtocol'
+import { createLogger, type OpenTeamLogger } from '../shared/logger'
 
 export type ContentRuntimeMessage = BackgroundToRoleMessage
 
-export interface ContentLogger {
-  debug(event: string, details?: Record<string, unknown>): void
-  info(event: string, details?: Record<string, unknown>): void
-  warn(event: string, details?: Record<string, unknown>): void
-}
+export type ContentLogger = Pick<OpenTeamLogger, 'debug' | 'info' | 'warn'>
 
-export const contentLog: ContentLogger = {
-  debug(event: string, details?: Record<string, unknown>): void {
-    console.debug('[OpenTeam][content]', event, details || {})
-  },
-  info(event: string, details?: Record<string, unknown>): void {
-    console.info('[OpenTeam][content]', event, details || {})
-  },
-  warn(event: string, details?: Record<string, unknown>): void {
-    console.warn('[OpenTeam][content]', event, details || {})
-  },
-}
+export const contentLog: ContentLogger = createLogger('content')
 
 export async function sendRuntimeMessage<T>(
   message: RoleToBackgroundMessage,

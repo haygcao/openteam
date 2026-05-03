@@ -1,14 +1,6 @@
-export const teamPageLog = {
-  debug(event: string, details?: Record<string, unknown>): void {
-    console.debug('[OpenTeam][team-page]', event, details || {})
-  },
-  info(event: string, details?: Record<string, unknown>): void {
-    console.info('[OpenTeam][team-page]', event, details || {})
-  },
-  warn(event: string, details?: Record<string, unknown>): void {
-    console.warn('[OpenTeam][team-page]', event, details || {})
-  },
-}
+import { createLogger } from '../shared/logger'
+
+export const teamPageLog = createLogger('team-page')
 
 export function createErrorPresenter(errorEl: HTMLElement): (message: string) => void {
   return message => {
