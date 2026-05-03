@@ -196,19 +196,20 @@ describe('team.html chat creation UI', () => {
   it('renders chat actions through a three-dot menu that updates, duplicates, and deletes chats', () => {
     const html = readFileSync(resolve(process.cwd(), 'public/team.html'), 'utf8')
     const source = readFileSync(resolve(process.cwd(), 'src/teamPage/index.ts'), 'utf8')
+    const chatListSource = readFileSync(resolve(process.cwd(), 'src/teamPage/chatListView.ts'), 'utf8')
 
-    expect(source).toContain("menuButton.className = 'icon-btn chat-menu-btn'")
-    expect(source).toContain("menuButton.textContent = '⋯'")
-    expect(source).toContain("menu.className = 'chat-action-menu'")
-    expect(source).toContain("rename.textContent = '编辑名称'")
-    expect(source).toContain("duplicate.textContent = '复制群聊'")
-    expect(source).toContain("clearMessages.textContent = '清空消息'")
-    expect(source).toContain("closeFrames.textContent = '关闭群聊'")
-    expect(source).toContain("remove.textContent = '删除群聊'")
+    expect(chatListSource).toContain("menuButton.className = 'icon-btn chat-menu-btn'")
+    expect(chatListSource).toContain("menuButton.textContent = '⋯'")
+    expect(chatListSource).toContain("menu.className = 'chat-action-menu'")
+    expect(chatListSource).toContain("rename.textContent = '编辑名称'")
+    expect(chatListSource).toContain("duplicate.textContent = '复制群聊'")
+    expect(chatListSource).toContain("clearMessages.textContent = '清空消息'")
+    expect(chatListSource).toContain("closeFrames.textContent = '关闭群聊'")
+    expect(chatListSource).toContain("remove.textContent = '删除群聊'")
     expect(source).toContain("runCommand('GROUP_CHAT_CLEAR_MESSAGES'")
     expect(source).toContain("runCommand('GROUP_CHAT_CLOSE'")
-    expect(source).toContain("runCommand('GROUP_CHAT_UPDATE'")
-    expect(source).toContain("runCommand('GROUP_CHAT_DUPLICATE'")
+    expect(chatListSource).toContain("runCommand('GROUP_CHAT_UPDATE'")
+    expect(chatListSource).toContain("runCommand('GROUP_CHAT_DUPLICATE'")
     expect(source).toContain("sendRuntimeMessage('GROUP_CHAT_DELETE'")
     expect(source).toContain("response.error === 'Unknown OpenTeam message'")
     expect(source).toContain('deleteChatFromLocalStore(chatId)')
@@ -273,9 +274,9 @@ describe('team.html chat creation UI', () => {
   })
 
   it('switches chats from the whole chat row while keeping row menus isolated', () => {
-    const source = readFileSync(resolve(process.cwd(), 'src/teamPage/index.ts'), 'utf8')
+    const source = readFileSync(resolve(process.cwd(), 'src/teamPage/chatListView.ts'), 'utf8')
 
-    expect(source).toContain("item.addEventListener('click', () => switchChat(chat.id))")
+    expect(source).toContain("item.addEventListener('click', () => deps.switchChat(chat.id))")
     expect(source).toContain("item.addEventListener('keydown'")
     expect(source).toContain("item.tabIndex = 0")
     expect(source).toContain("item.setAttribute('role', 'button')")
@@ -376,7 +377,7 @@ describe('team.html chat creation UI', () => {
 
   it('keeps chat titles as plain text and omits chat status from list rows', () => {
     const html = readFileSync(resolve(process.cwd(), 'public/team.html'), 'utf8')
-    const source = readFileSync(resolve(process.cwd(), 'src/teamPage/index.ts'), 'utf8')
+    const source = readFileSync(resolve(process.cwd(), 'src/teamPage/chatListView.ts'), 'utf8')
 
     expect(source).toContain("name.className = 'chat-name'")
     expect(source).not.toContain("name.className = 'chat-name btn btn-ghost'")
@@ -388,9 +389,9 @@ describe('team.html chat creation UI', () => {
 
   it('uses a WeChat-like chat list row with avatar, body, and right time column', () => {
     const html = readFileSync(resolve(process.cwd(), 'public/team.html'), 'utf8')
-    const source = readFileSync(resolve(process.cwd(), 'src/teamPage/index.ts'), 'utf8')
+    const source = readFileSync(resolve(process.cwd(), 'src/teamPage/chatListView.ts'), 'utf8')
 
-    expect(source).toContain("avatar.className = `chat-avatar ${roleToneClass(chat.name)}`")
+    expect(source).toContain("avatar.className = `chat-avatar ${deps.roleToneClass(chat.name)}`")
     expect(source).toContain("body.className = 'chat-item-body'")
     expect(source).toContain("side.className = 'chat-item-side'")
     expect(source).toContain("time.className = 'chat-time'")
