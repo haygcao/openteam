@@ -829,6 +829,52 @@ describe('background group chat experience handlers', () => {
     expect(promptCalls[0][1].messageId).toBe('msg-1')
     expect(promptCalls[0][1].replyAttemptId).toBe(result.store.rolesById['role-1'].replyAttemptId)
   })
+
+  it('prefers the requested retry message over a stale role prompt pointer', async () => {
+    const store = makeStore()
+    store.currentChatId = 'chat-1'
+    store.chatsById['chat-1'] = { ...makeChat('chat-1', ['role-1']), messageIds: ['msg-first', 'msg-current'], nextMessageSeq: 3, status: 'running' }
+    store.chatOrder = ['chat-1']
+    store.rolesById['role-1'] = makeRole('chat-1', 'role-1', '工程师', { status: 'thinking', lastPromptMessageId: 'msg-first', replyAttemptId: 'attempt-stale' })
+    store.messagesById['msg-first'] = {
+      id: 'msg-first',
+      chatId: 'chat-1',
+      seq: 1,
+      type: 'user',
+      content: '第一条消息',
+      targetRoleIds: ['role-1'],
+      createdAt: 1,
+      status: 'received',
+      deliveryStatus: { 'role-1': 'received' },
+    }
+    store.messagesById['msg-current'] = {
+      id: 'msg-current',
+      chatId: 'chat-1',
+      seq: 2,
+      type: 'user',
+      content: '现在真正要回复的问题',
+      targetRoleIds: ['role-1'],
+      createdAt: 2,
+      status: 'sent',
+      deliveryStatus: { 'role-1': 'sent' },
+    }
+    const harness = await setupBackground(store)
+    await harness.invoke({ type: 'TEAM_FRAME_ROLE_READY', chatId: 'chat-1', roleId: 'role-1', hostTabId: 900 }, { tab: { id: 101 } as chrome.tabs.Tab, frameId: 7, url: 'https://gemini.google.com/app/abc' })
+
+    const result = await harness.invoke({ type: 'GROUP_ROLE_RETRY_REPLY', chatId: 'chat-1', roleId: 'role-1', messageId: 'msg-current' }) as { ok: boolean; store: OpenTeamStore }
+
+    expect(result.ok).toBe(true)
+    expect(result.store.rolesById['role-1'].lastPromptMessageId).toBe('msg-current')
+    expect(result.store.rolesById['role-1'].replyAttemptId).toMatch(/^attempt-/)
+    expect(result.store.rolesById['role-1'].replyAttemptId).not.toBe('attempt-stale')
+    expect(result.store.messagesById['msg-current'].deliveryStatus?.['role-1']).toBe('pending')
+    expect(result.store.messagesById['msg-first'].deliveryStatus?.['role-1']).toBe('received')
+    const promptCalls = harness.tabsSendMessage.mock.calls.filter(call => call[1]?.type === 'TEAM_SEND_PROMPT')
+    expect(promptCalls).toHaveLength(1)
+    expect(promptCalls[0][1].messageId).toBe('msg-current')
+    expect(promptCalls[0][1].content).toContain('现在真正要回复的问题')
+    expect(promptCalls[0][1].content).not.toContain('用户最新消息：\n第一条消息')
+  })
 })
 
 function makeStore(): OpenTeamStore {

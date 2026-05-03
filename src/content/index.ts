@@ -11,7 +11,7 @@ import { createReplyTracker } from './replyTracker'
 import { createReplyTimeout } from './replyTimeout'
 import { waitBeforePromptInput, PROMPT_INPUT_DELAY_MS } from './promptDelay'
 import { keepDeepestResponseContainers } from './responseContainers'
-import { findLatestCompensationReply } from './replyCompensation'
+import { findLatestCompensationCandidate, findLatestCompensationReply } from './replyCompensation'
 import { getActiveChatSiteAdapter } from './sites'
 
 type ContentRuntimeMessage =
@@ -36,6 +36,7 @@ const PANEL_ID = '__openteam_team_panel__'
 const FRAME_ASSIGN_MESSAGE = 'OPENTEAM_ASSIGN_FRAME_ROLE'
 const RESPONSE_DEBOUNCE_MS = 2500
 const RESPONSE_FINAL_SETTLE_MS = 1500
+const REPLY_POLL_INTERVAL_MS = 2000
 const REPLY_TIMEOUT_MS = 120000
 const siteAdapter = getActiveChatSiteAdapter()
 const log = {
@@ -58,6 +59,8 @@ let lastReportedConversationKey = ''
 let conversationMonitorStarted = false
 let promptBaselineContainers = new Set<Element>()
 let promptBaselineReplies = new Set<string>()
+let replyPollingTimer: ReturnType<typeof setTimeout> | null = null
+let replyPollingInFlight = false
 const replyTracker = createReplyTracker()
 let panelApi: ReturnType<typeof createTeamPanel> | null = null
 const replyTimeout = createReplyTimeout(REPLY_TIMEOUT_MS, messageId => {
@@ -72,6 +75,7 @@ const replyTimeout = createReplyTimeout(REPLY_TIMEOUT_MS, messageId => {
     error: `等待 Gemini 回复超时（${Math.round(REPLY_TIMEOUT_MS / 1000)} 秒）`,
   }).catch(error => log.warn('reply-timeout:status-failed', { error: error instanceof Error ? error.message : String(error) }))
   reportRoleError(messageId, `等待 Gemini 回复超时（${Math.round(REPLY_TIMEOUT_MS / 1000)} 秒）`, undefined, undefined, replyAttemptId)
+  clearReplyPolling()
 })
 
 function getConversationId(): string {
@@ -161,7 +165,101 @@ function findCompensationReply(messageId: string): { text: string; element: Elem
   })
 }
 
-function reportAcceptedReply(messageId: string, reply: ReportableReplyText, source: 'observer' | 'timeout-compensation'): void {
+function findCompensationCandidate(): { text: string; element: Element } | undefined {
+  return findLatestCompensationCandidate({
+    containers: siteAdapter.getResponseContainers(),
+    readText: siteAdapter.readResponseText,
+    isBaseline: isPromptBaselineReply,
+  })
+}
+
+function clearReplyPolling(): void {
+  if (replyPollingTimer) {
+    window.clearTimeout(replyPollingTimer)
+    replyPollingTimer = null
+  }
+  replyPollingInFlight = false
+}
+
+function startReplyPolling(messageId: string, replyAttemptId: string | undefined): void {
+  clearReplyPolling()
+
+  let stableElement: Element | undefined
+  let stableText = ''
+  let stableSince = 0
+
+  const schedule = () => {
+    replyPollingTimer = window.setTimeout(tick, REPLY_POLL_INTERVAL_MS)
+  }
+
+  const resetStableCandidate = () => {
+    stableElement = undefined
+    stableText = ''
+    stableSince = 0
+  }
+
+  const tick = () => {
+    replyPollingTimer = null
+
+    if (activeMessageId !== messageId || activeReplyAttemptId !== replyAttemptId) {
+      clearReplyPolling()
+      return
+    }
+
+    if (replyPollingInFlight) {
+      schedule()
+      return
+    }
+
+    const generating = siteAdapter.isGenerating()
+    const candidate = findCompensationCandidate()
+    if (!candidate || generating) {
+      if (generating) log.debug('reply-poll:defer-generating', { messageId })
+      resetStableCandidate()
+      schedule()
+      return
+    }
+
+    const timestamp = Date.now()
+    if (candidate.element !== stableElement || candidate.text !== stableText) {
+      stableElement = candidate.element
+      stableText = candidate.text
+      stableSince = timestamp
+      log.debug('reply-poll:candidate', { messageId, textLength: candidate.text.length })
+      schedule()
+      return
+    }
+
+    if (timestamp - stableSince < RESPONSE_FINAL_SETTLE_MS) {
+      schedule()
+      return
+    }
+
+    replyPollingInFlight = true
+    resolveReportableReplyText(candidate.element, candidate.text)
+      .then(reply => {
+        if (activeMessageId !== messageId || activeReplyAttemptId !== replyAttemptId) return
+        if (!replyTracker.consumeIfNewForMessage(getConversationId(), reply.text, messageId)) {
+          log.debug('reply-poll:skipped', { messageId, textLength: reply.text.length, roleId: assignedRole?.roleId })
+          schedule()
+          return
+        }
+        log.warn('reply-poll:compensated', { messageId, textLength: reply.text.length, roleId: assignedRole?.roleId })
+        reportAcceptedReply(messageId, reply, 'polling-compensation')
+      })
+      .catch(error => {
+        log.warn('reply-poll:resolve-failed', { messageId, error: error instanceof Error ? error.message : String(error) })
+        if (activeMessageId === messageId && activeReplyAttemptId === replyAttemptId) schedule()
+      })
+      .finally(() => {
+        replyPollingInFlight = false
+      })
+  }
+
+  schedule()
+}
+
+function reportAcceptedReply(messageId: string, reply: ReportableReplyText, source: 'observer' | 'timeout-compensation' | 'polling-compensation'): void {
   if (!assignedRole) return
 
   activeMessageId = undefined
@@ -169,6 +267,7 @@ function reportAcceptedReply(messageId: string, reply: ReportableReplyText, sour
   activeReplyAttemptId = undefined
   clearPromptReplyBaseline()
   replyTimeout.clear()
+  clearReplyPolling()
   const text = reply.text
   log.info('reply:accepted', { messageId, textLength: text.length, roleId: assignedRole.roleId, roleName: assignedRole.roleName, source })
 
@@ -831,7 +930,10 @@ function registerMessageHandlers(): void {
       })
       .then(() => sendRuntimeMessage({ type: 'TEAM_ROLE_STATUS', status: 'generating' }))
       .then(() => {
-        if (message.messageId) replyTimeout.arm(message.messageId)
+        if (message.messageId) {
+          replyTimeout.arm(message.messageId)
+          startReplyPolling(message.messageId, message.replyAttemptId)
+        }
         log.info('message:send-prompt:ok', { messageId: message.messageId })
         sendResponse({ ok: true, messageId: message.messageId })
       })
@@ -842,6 +944,7 @@ function registerMessageHandlers(): void {
         activeReplyAttemptId = undefined
         clearPromptReplyBaseline()
         replyTimeout.clear()
+        clearReplyPolling()
         reportRoleError(message.messageId, reason, promptChatId, promptRoleId, message.replyAttemptId)
         sendRuntimeMessage({ type: 'TEAM_ROLE_STATUS', status: 'error', error: reason }).catch(() => undefined)
         sendResponse({ ok: false, messageId: message.messageId, error: reason })

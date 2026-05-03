@@ -12,6 +12,13 @@ export interface CompensationReply {
   text: string
 }
 
+export function findLatestCompensationCandidate(input: Omit<FindLatestCompensationReplyInput, 'consume'>): CompensationReply | undefined {
+  return keepDeepestResponseContainers(input.containers)
+    .map(element => ({ element, text: input.readText(element).trim() }))
+    .filter(candidate => candidate.text && !input.isBaseline(candidate.text, candidate.element))
+    .reverse()[0]
+}
+
 export function findLatestCompensationReply(input: FindLatestCompensationReplyInput): CompensationReply | undefined {
   const candidates = keepDeepestResponseContainers(input.containers)
     .map(element => ({ element, text: input.readText(element).trim() }))

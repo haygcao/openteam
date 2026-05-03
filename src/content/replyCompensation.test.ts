@@ -2,7 +2,7 @@
 
 import { describe, expect, it } from 'vitest'
 import { createReplyTracker } from './replyTracker'
-import { findLatestCompensationReply } from './replyCompensation'
+import { findLatestCompensationCandidate, findLatestCompensationReply } from './replyCompensation'
 
 describe('findLatestCompensationReply', () => {
   it('returns the latest unreported reply while ignoring restored DOM history', () => {
@@ -40,5 +40,23 @@ describe('findLatestCompensationReply', () => {
     })
 
     expect(result).toBeUndefined()
+  })
+
+  it('can inspect the latest non-baseline reply without consuming it', () => {
+    document.body.innerHTML = `
+      <message-content id="baseline">发送前已有回复</message-content>
+      <message-content id="new">监听漏掉的新回复</message-content>
+    `
+    const tracker = createReplyTracker()
+
+    const candidate = findLatestCompensationCandidate({
+      containers: [...document.querySelectorAll('message-content')],
+      readText: element => element.textContent ?? '',
+      isBaseline: (_text, element) => element.id === 'baseline',
+    })
+
+    expect(candidate?.text).toBe('监听漏掉的新回复')
+    expect(candidate?.element.id).toBe('new')
+    expect(tracker.consumeIfNewForMessage('conv-a', '监听漏掉的新回复', 'msg-1')).toBe(true)
   })
 })

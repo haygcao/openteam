@@ -242,6 +242,49 @@ function staleReplyReason(store: OpenTeamStore, chat: GroupChat, role: GroupRole
   return undefined
 }
 
+function isUserMessageForRole(message: GroupMessage | undefined, chat: GroupChat, role: GroupRole): message is GroupMessage {
+  return Boolean(
+    message &&
+      message.chatId === chat.id &&
+      message.type === 'user' &&
+      (!message.targetRoleIds || message.targetRoleIds.includes(role.id)),
+  )
+}
+
+function isPendingRetryStatus(message: GroupMessage, role: GroupRole): boolean {
+  const deliveryStatus = message.deliveryStatus?.[role.id]
+  return deliveryStatus === 'pending' || deliveryStatus === 'sent'
+}
+
+function findLatestPendingRetryMessage(store: OpenTeamStore, chat: GroupChat, role: GroupRole): GroupMessage | undefined {
+  for (const messageId of [...chat.messageIds].reverse()) {
+    const message = store.messagesById[messageId]
+    if (isUserMessageForRole(message, chat, role) && isPendingRetryStatus(message, role)) return message
+  }
+  return undefined
+}
+
+function resolveRetryUserMessage(store: OpenTeamStore, chat: GroupChat, role: GroupRole, requestedMessageId: string | undefined): GroupMessage | undefined {
+  if (requestedMessageId) {
+    const requestedMessage = store.messagesById[requestedMessageId]
+    return isUserMessageForRole(requestedMessage, chat, role) ? requestedMessage : undefined
+  }
+
+  const activePromptMessage = role.lastPromptMessageId ? store.messagesById[role.lastPromptMessageId] : undefined
+  if (isUserMessageForRole(activePromptMessage, chat, role) && isPendingRetryStatus(activePromptMessage, role)) return activePromptMessage
+
+  const latestPendingMessage = findLatestPendingRetryMessage(store, chat, role)
+  if (latestPendingMessage && role.lastPromptMessageId && latestPendingMessage.id !== role.lastPromptMessageId) {
+    log.warn('role-retry-reply:stale-prompt-pointer', {
+      chatId: chat.id,
+      roleId: role.id,
+      staleMessageId: role.lastPromptMessageId,
+      retryMessageId: latestPendingMessage.id,
+    })
+  }
+  return latestPendingMessage
+}
+
 function isMeaningfulConversationId(value: string | undefined): value is string {
   return Boolean(value && value !== '__default__')
 }
@@ -872,10 +915,9 @@ async function handleRoleRetryReply(message: RuntimeMessage) {
   const { store, result } = await mutateStore(store => {
     const chat = requireChat(store, chatId)
     const role = requireRole(store, chat.id, roleId)
-    const userMessageId = role.lastPromptMessageId ?? readOptionalString(message.messageId)
-    const userMessage = userMessageId ? store.messagesById[userMessageId] : undefined
-    if (!userMessage || userMessage.chatId !== chat.id || userMessage.type !== 'user') throw new Error('找不到可重试的用户消息')
-    if (userMessage.targetRoleIds && !userMessage.targetRoleIds.includes(role.id)) throw new Error('该消息没有发送给这个人员')
+    const requestedMessageId = readOptionalString(message.messageId)
+    const userMessage = resolveRetryUserMessage(store, chat, role, requestedMessageId)
+    if (!userMessage) throw new Error(requestedMessageId ? '该消息没有发送给这个人员' : '找不到可重试的用户消息')
 
     const roles = getChatRoles(store, chat)
     const messages = getChatMessages(store, chat)
