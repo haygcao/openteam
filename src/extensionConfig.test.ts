@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
+import { hasTopLevelStaticImport } from '../vite.config'
 
 describe('extension security configuration', () => {
   it('scopes host permissions to supported AI chat sites', () => {
@@ -40,5 +41,10 @@ describe('extension security configuration', () => {
       expect(rule.condition?.urlFilter).not.toBe('*://*/*')
       expect(rule.condition?.resourceTypes).not.toContain('main_frame')
     }
+  })
+
+  it('detects compact static imports in content script output', () => {
+    expect(hasTopLevelStaticImport('import{c as createLogger}from"./assets/logger.js";')).toBe(true)
+    expect(hasTopLevelStaticImport('(() => { console.log("bundled") })();')).toBe(false)
   })
 })

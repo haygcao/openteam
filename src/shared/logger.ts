@@ -14,6 +14,8 @@ export interface LoggerOptions {
 
 type ConsoleLevel = 'debug' | 'info' | 'warn' | 'error'
 
+declare const __OPENTEAM_DEV__: boolean | undefined
+
 export function createLogger(scope: string, baseContext: LogDetails = {}, options: LoggerOptions = {}): OpenTeamLogger {
   const shouldEmitVerbose = () => options.debugEnabled ?? isDebugLoggingEnabled()
 
@@ -34,8 +36,7 @@ export function createLogger(scope: string, baseContext: LogDetails = {}, option
 }
 
 function isDebugLoggingEnabled(): boolean {
-  const metaEnv = (import.meta as unknown as { env?: { DEV?: boolean } }).env
-  if (metaEnv?.DEV) return true
+  if (typeof __OPENTEAM_DEV__ !== 'undefined' && __OPENTEAM_DEV__) return true
 
   try {
     const globalRecord = globalThis as unknown as { OPENTEAM_DEBUG?: boolean; localStorage?: Storage; location?: Location }
