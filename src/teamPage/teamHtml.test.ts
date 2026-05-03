@@ -46,7 +46,7 @@ describe('team.html chat creation UI', () => {
     const source = readFileSync(resolve(process.cwd(), 'src/teamPage/index.ts'), 'utf8')
 
     expect(source).toContain('function addPersonSiteControl(itemKey: string, chatSite: ChatSite): HTMLElement')
-    expect(source).toContain('const chatSite = addPersonSiteByKey.get(item.key) ?? item.chatSite')
+    expect(source).toContain('const chatSite = appState.addPersonSiteByKey.get(item.key) ?? item.chatSite')
     expect(source).toContain("if (item.source === 'library') return { source: 'library', roleTemplateId: item.roleTemplateId, chatSite }")
     expect(source).toContain("source: 'temporary'")
     expect(source).toContain("selected?.value === 'claude'")
@@ -324,7 +324,7 @@ describe('team.html chat creation UI', () => {
     expect(html).toMatch(/\.composer\s*{[^}]*border-top:\s*1px solid rgba\(132,\s*153,\s*171,\s*0\.12\);/s)
     expect(html).toMatch(/\.drawer-summary\s*{[^}]*min-height:\s*30px;/s)
     expect(source).toContain("togglePeopleDrawerEl.textContent = '成员 0'")
-    expect(source).toContain('togglePeopleDrawerEl.textContent = `成员 ${roles.length} ${peopleDrawerOpen ?')
+    expect(source).toContain('togglePeopleDrawerEl.textContent = `成员 ${roles.length} ${appState.peopleDrawerOpen ?')
     expect(source).not.toContain('人回复中')
   })
 

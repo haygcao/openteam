@@ -3,15 +3,13 @@ import { getDefaultChatSiteUrl } from '../group/conversationUrl'
 import type { ChatSite, GroupChat, GroupMessage, GroupRole, MessageReference, OpenTeamStore, RoleStatus, RoleTemplate, RoomMode } from '../group/types'
 import { createDefaultStore, loadStore, saveStore } from '../group/store'
 import { parseGroupMentions } from '../group/mentionParser'
-import { createTeamPageState } from './appState'
+import { createTeamPageState, type RoleReadyWaiter } from './appState'
 import { createTeamPageDomRefs, requireElement } from './domRefs'
 import { createIframeHost } from './iframeHost'
 import { createTeamPageRuntimeClient, type StorePushMessage } from './runtimeClient'
 import { buildChatRenderItems, formatChatListTime, getAvatarInitial, getChatStartupNotice, getVisibleThinkingRoles, isUnavailableRolesError, shouldAutoReconnectRole, shouldConfirmMentionWithEnter, shouldSendMessageWithEnter, THINKING_TIMEOUT_MS } from './chatExperience'
 
 type TemplateDraft = Pick<RoleTemplate, 'name' | 'description' | 'systemPrompt' | 'defaultChatSite'>
-type CachedMessageNode = { signature: string; node: HTMLElement }
-type TemporaryPersonDraft = Pick<RoleTemplate, 'name' | 'description' | 'systemPrompt'> & { id: string; chatSite: ChatSite }
 type AddPersonItem =
   | { key: string; source: 'library'; roleTemplateId: string; name: string; description?: string; chatSite: ChatSite }
   | { key: string; source: 'temporary'; draftId: string; name: string; description?: string; systemPrompt: string; chatSite: ChatSite }
@@ -23,32 +21,7 @@ const COPY_FEEDBACK_MS = 1200
 const markdownRenderer = new MarkdownIt({ html: false, linkify: true, breaks: true })
 const appState = createTeamPageState()
 
-interface RoleReadyWaiter {
-  chatId: string
-  roleIds: Set<string>
-  resolve: () => void
-  reject: (error: Error) => void
-  timeoutId: number
-}
-
 let store: OpenTeamStore = appState.store
-let selectedChatId: string | undefined
-let selectedRoleId: string | undefined
-let selectedTemplateId: string | undefined
-let selectedReference: MessageReference | undefined
-let mentionIndex = 0
-let peopleDrawerOpen = false
-let chatMenuChatId: string | undefined
-let roleSiteMenuRoleId: string | undefined
-let addPersonSiteMenuId: string | undefined
-let pendingSwitchAnimationFrame: number | undefined
-let thinkingTimeoutTimers: number[] = []
-const loggedThinkingTimeoutRoleIds = new Set<string>()
-const messageNodeCache = new Map<string, CachedMessageNode>()
-const reconnectingRoleKeys = new Set<string>()
-const roleReadyWaiters = new Set<RoleReadyWaiter>()
-const temporaryPersonDrafts: TemporaryPersonDraft[] = []
-const addPersonSiteByKey = new Map<string, ChatSite>()
 
 const teamDomRefs = createTeamPageDomRefs()
 const appShellEl = teamDomRefs.appShellEl
@@ -158,11 +131,11 @@ async function refreshCurrentChat(): Promise<void> {
 function applyStore(nextStore: OpenTeamStore): void {
   appState.store = nextStore
   store = appState.store
-  selectedChatId = pickCurrentChatId()
+  appState.selectedChatId = pickCurrentChatId()
   const roles = getCurrentRoles()
-  if (!selectedRoleId || !roles.some(role => role.id === selectedRoleId)) selectedRoleId = roles[0]?.id
-  if (selectedReference && selectedReference.messageId && !getCurrentMessages().some(message => message.id === selectedReference?.messageId)) {
-    selectedReference = undefined
+  if (!appState.selectedRoleId || !roles.some(role => role.id === appState.selectedRoleId)) appState.selectedRoleId = roles[0]?.id
+  if (appState.selectedReference && appState.selectedReference.messageId && !getCurrentMessages().some(message => message.id === appState.selectedReference?.messageId)) {
+    appState.selectedReference = undefined
   }
   syncIframeHost()
   render()
@@ -170,7 +143,7 @@ function applyStore(nextStore: OpenTeamStore): void {
 }
 
 function pickCurrentChatId(): string | undefined {
-  if (selectedChatId && store.chatsById[selectedChatId]) return selectedChatId
+  if (appState.selectedChatId && store.chatsById[appState.selectedChatId]) return appState.selectedChatId
   if (store.currentChatId && store.chatsById[store.currentChatId]) return store.currentChatId
   return [...store.chatOrder]
     .sort((left, right) => (store.chatsById[right]?.updatedAt ?? 0) - (store.chatsById[left]?.updatedAt ?? 0))
@@ -178,7 +151,7 @@ function pickCurrentChatId(): string | undefined {
 }
 
 function getCurrentChat(): GroupChat | undefined {
-  return selectedChatId ? store.chatsById[selectedChatId] : undefined
+  return appState.selectedChatId ? store.chatsById[appState.selectedChatId] : undefined
 }
 
 function getCurrentRoles(): GroupRole[] {
@@ -217,10 +190,10 @@ function areRolesReady(chatId: string, roleIds: string[]): boolean {
 }
 
 function notifyRoleReadyWaiters(): void {
-  for (const waiter of [...roleReadyWaiters]) {
+  for (const waiter of [...appState.roleReadyWaiters]) {
     if (!areRolesReady(waiter.chatId, [...waiter.roleIds])) continue
     window.clearTimeout(waiter.timeoutId)
-    roleReadyWaiters.delete(waiter)
+    appState.roleReadyWaiters.delete(waiter)
     waiter.resolve()
   }
 }
@@ -236,11 +209,11 @@ function waitForRolesReady(chatId: string, roleIds: string[], timeoutMs = AUTO_R
       resolve,
       reject,
       timeoutId: window.setTimeout(() => {
-        roleReadyWaiters.delete(waiter)
+        appState.roleReadyWaiters.delete(waiter)
         reject(new Error('自动连接人员超时，请稍后重试或手动恢复会话'))
       }, timeoutMs),
     }
-    roleReadyWaiters.add(waiter)
+    appState.roleReadyWaiters.add(waiter)
   })
 }
 
@@ -282,8 +255,8 @@ function renderChatList(): void {
 
   for (const chat of chats) {
     const item = document.createElement('section')
-    const hasActivity = chat.id !== selectedChatId && Boolean(store.viewState?.chatHasNewMessageById?.[chat.id])
-    item.className = `chat-item${chat.id === selectedChatId ? ' active' : ''}${hasActivity ? ' has-activity' : ''}`
+    const hasActivity = chat.id !== appState.selectedChatId && Boolean(store.viewState?.chatHasNewMessageById?.[chat.id])
+    item.className = `chat-item${chat.id === appState.selectedChatId ? ' active' : ''}${hasActivity ? ' has-activity' : ''}`
     item.tabIndex = 0
     item.setAttribute('role', 'button')
     item.setAttribute('aria-label', `切换到 ${chat.name}`)
@@ -314,7 +287,7 @@ function renderChatList(): void {
     menuButton.textContent = '⋯'
     menuButton.addEventListener('click', event => {
       event.stopPropagation()
-      chatMenuChatId = chatMenuChatId === chat.id ? undefined : chat.id
+      appState.chatMenuChatId = appState.chatMenuChatId === chat.id ? undefined : chat.id
       renderChatList()
     })
     row.append(name)
@@ -333,7 +306,7 @@ function renderChatList(): void {
     side.append(time, menuButton)
 
     item.append(avatar, body, side)
-    if (chatMenuChatId === chat.id) item.append(chatActionMenu(chat))
+    if (appState.chatMenuChatId === chat.id) item.append(chatActionMenu(chat))
     chatListEl.append(item)
   }
 }
@@ -348,7 +321,7 @@ function chatActionMenu(chat: GroupChat): HTMLElement {
   rename.textContent = '编辑名称'
   rename.addEventListener('click', () => {
     const nextName = window.prompt('编辑群聊名称', chat.name)?.trim()
-    chatMenuChatId = undefined
+    appState.chatMenuChatId = undefined
     if (!nextName) {
       renderChatList()
       return
@@ -360,7 +333,7 @@ function chatActionMenu(chat: GroupChat): HTMLElement {
   duplicate.className = 'btn btn-ghost'
   duplicate.textContent = '复制群聊'
   duplicate.addEventListener('click', () => {
-    chatMenuChatId = undefined
+    appState.chatMenuChatId = undefined
     renderChatList()
     runCommand('GROUP_CHAT_DUPLICATE', { chatId: chat.id }).catch(error => showError(error.message))
   })
@@ -369,7 +342,7 @@ function chatActionMenu(chat: GroupChat): HTMLElement {
   clearMessages.className = 'btn btn-ghost'
   clearMessages.textContent = '清空消息'
   clearMessages.addEventListener('click', () => {
-    chatMenuChatId = undefined
+    appState.chatMenuChatId = undefined
     renderChatList()
     if (!window.confirm(`确定清空「${chat.name}」的聊天消息吗？人员会保留，但所有 iframe 会重新创建。`)) return
     clearChatMessages(chat.id).catch(error => showError(error.message))
@@ -379,7 +352,7 @@ function chatActionMenu(chat: GroupChat): HTMLElement {
   closeFrames.className = 'btn btn-ghost'
   closeFrames.textContent = '关闭群聊'
   closeFrames.addEventListener('click', () => {
-    chatMenuChatId = undefined
+    appState.chatMenuChatId = undefined
     renderChatList()
     closeChatFrames(chat.id).catch(error => showError(error.message))
   })
@@ -388,7 +361,7 @@ function chatActionMenu(chat: GroupChat): HTMLElement {
   remove.className = 'btn btn-ghost btn-danger'
   remove.textContent = '删除群聊'
   remove.addEventListener('click', () => {
-    chatMenuChatId = undefined
+    appState.chatMenuChatId = undefined
     renderChatList()
     if (!window.confirm(`确定删除「${chat.name}」吗？删除后这个群聊的消息和角色都会移除。`)) return
     deleteChat(chat.id).catch(error => showError(error.message))
@@ -399,10 +372,10 @@ function chatActionMenu(chat: GroupChat): HTMLElement {
 
 async function clearChatMessages(chatId: string): Promise<void> {
   await runCommand('GROUP_CHAT_CLEAR_MESSAGES', { chatId })
-  messageNodeCache.clear()
+  appState.messageNodeCache.clear()
   iframeHost.removeChat(chatId)
   const chat = store.chatsById[chatId]
-  if (chat && selectedChatId === chatId) iframeHost.restoreChat(chat, chat.roleIds.map(roleId => store.rolesById[roleId]).filter((role): role is GroupRole => Boolean(role)))
+  if (chat && appState.selectedChatId === chatId) iframeHost.restoreChat(chat, chat.roleIds.map(roleId => store.rolesById[roleId]).filter((role): role is GroupRole => Boolean(role)))
 }
 
 async function closeChatFrames(chatId: string): Promise<void> {
@@ -461,8 +434,8 @@ function renderChatHeader(): void {
   chatStatusEl.className = `status-pill status-${chat.status}`
   chatStatusEl.textContent = chatStatusLabel(chat.status)
   togglePeopleDrawerEl.disabled = false
-  togglePeopleDrawerEl.textContent = `成员 ${roles.length} ${peopleDrawerOpen ? '▴' : '▾'}`
-  togglePeopleDrawerEl.setAttribute('aria-expanded', String(peopleDrawerOpen))
+  togglePeopleDrawerEl.textContent = `成员 ${roles.length} ${appState.peopleDrawerOpen ? '▴' : '▾'}`
+  togglePeopleDrawerEl.setAttribute('aria-expanded', String(appState.peopleDrawerOpen))
 }
 
 function renderMessages(): void {
@@ -505,7 +478,7 @@ function renderMessages(): void {
 
 function renderMessageNode(message: GroupMessage, showName = true, showAvatar = true): HTMLElement {
   const signature = messageSignature(message, showName, showAvatar)
-  const cached = messageNodeCache.get(message.id)
+  const cached = appState.messageNodeCache.get(message.id)
   if (cached?.signature === signature) return cached.node
 
   const article = document.createElement('article')
@@ -573,11 +546,11 @@ function renderMessageNode(message: GroupMessage, showName = true, showAvatar = 
 }
 
 function cacheMessageNode(messageId: string, signature: string, node: HTMLElement): void {
-  messageNodeCache.set(messageId, { signature, node })
-  while (messageNodeCache.size > MAX_CACHED_MESSAGE_NODES) {
-    const oldestMessageId = messageNodeCache.keys().next().value
+  appState.messageNodeCache.set(messageId, { signature, node })
+  while (appState.messageNodeCache.size > MAX_CACHED_MESSAGE_NODES) {
+    const oldestMessageId = appState.messageNodeCache.keys().next().value
     if (!oldestMessageId) return
-    messageNodeCache.delete(oldestMessageId)
+    appState.messageNodeCache.delete(oldestMessageId)
   }
 }
 
@@ -690,16 +663,16 @@ function appendMentionsToBody(body: HTMLElement, mentions: HTMLElement): void {
 }
 
 function scheduleThinkingTimeouts(): void {
-  for (const timer of thinkingTimeoutTimers) window.clearTimeout(timer)
-  thinkingTimeoutTimers = []
+  for (const timer of appState.thinkingTimeoutTimers) window.clearTimeout(timer)
+  appState.thinkingTimeoutTimers = []
 
   const now = Date.now()
   for (const role of getCurrentRoles()) {
     if (role.status !== 'thinking') continue
     const remaining = THINKING_TIMEOUT_MS - (now - role.updatedAt)
     if (remaining <= 0) {
-      if (!loggedThinkingTimeoutRoleIds.has(role.id)) {
-        loggedThinkingTimeoutRoleIds.add(role.id)
+      if (!appState.loggedThinkingTimeoutRoleIds.has(role.id)) {
+        appState.loggedThinkingTimeoutRoleIds.add(role.id)
         log.warn('ui:thinking-bubble:timeout', { chatId: role.chatId, roleId: role.id, timeoutMs: THINKING_TIMEOUT_MS })
         runCommand('TEAM_ROLE_ERROR', {
           chatId: role.chatId,
@@ -710,8 +683,8 @@ function scheduleThinkingTimeouts(): void {
       }
       continue
     }
-    loggedThinkingTimeoutRoleIds.delete(role.id)
-    thinkingTimeoutTimers.push(window.setTimeout(render, remaining + 1))
+    appState.loggedThinkingTimeoutRoleIds.delete(role.id)
+    appState.thinkingTimeoutTimers.push(window.setTimeout(render, remaining + 1))
   }
 }
 
@@ -764,7 +737,7 @@ function renderComposerState(): void {
   const targetRoleIds = raw && parsed.ok ? parsed.targetRoleIds : roles.map(role => role.id)
   const targets = roles.filter(role => targetRoleIds.includes(role.id))
   const unavailable = targets.filter(role => role.status !== 'ready')
-  const reconnecting = targets.filter(role => reconnectingRoleKeys.has(teamRoleKey(role.chatId, role.id)))
+  const reconnecting = targets.filter(role => appState.reconnectingRoleKeys.has(teamRoleKey(role.chatId, role.id)))
   const thinking = getVisibleThinkingRoles(roles)
 
   if (!chat) {
@@ -801,7 +774,7 @@ function renderComposerState(): void {
 
 function renderReferenceDraft(): void {
   referenceDraftEl.replaceChildren()
-  if (!selectedReference) {
+  if (!appState.selectedReference) {
     referenceDraftEl.hidden = true
     return
   }
@@ -809,7 +782,7 @@ function renderReferenceDraft(): void {
   referenceDraftEl.hidden = false
   const preview = document.createElement('div')
   preview.className = 'reference-draft-preview'
-  preview.textContent = `引用 ${selectedReference.roleName || '人员'}：${selectedReference.contentSnapshot}`
+  preview.textContent = `引用 ${appState.selectedReference.roleName || '人员'}：${appState.selectedReference.contentSnapshot}`
 
   const cancel = document.createElement('button')
   cancel.type = 'button'
@@ -817,7 +790,7 @@ function renderReferenceDraft(): void {
   cancel.setAttribute('aria-label', '取消引用')
   cancel.textContent = '×'
   cancel.addEventListener('click', () => {
-    selectedReference = undefined
+    appState.selectedReference = undefined
     renderComposerState()
   })
   referenceDraftEl.append(preview, cancel)
@@ -833,7 +806,7 @@ function renderMentionPanel(): void {
   roles.forEach((role, index) => {
     const option = document.createElement('button')
     option.type = 'button'
-    option.className = `mention-option${index === mentionIndex ? ' active' : ''}`
+    option.className = `mention-option${index === appState.mentionIndex ? ' active' : ''}`
     const avatar = document.createElement('span')
     avatar.className = `mention-avatar ${roleToneClass(role.name)}`
     avatar.textContent = roleAvatarLabel(role.name)
@@ -847,8 +820,8 @@ function renderMentionPanel(): void {
 
 function renderRolePanel(): void {
   const roles = getCurrentRoles()
-  const selectedRole = selectedRoleId ? store.rolesById[selectedRoleId] : undefined
-  rolePanelEl.classList.toggle('open', peopleDrawerOpen)
+  const selectedRole = appState.selectedRoleId ? store.rolesById[appState.selectedRoleId] : undefined
+  rolePanelEl.classList.toggle('open', appState.peopleDrawerOpen)
   roleSummaryEl.textContent = `${roles.length} 人员${selectedRole ? ` · 当前：${selectedRole.name}` : ''}`
   roleListEl.replaceChildren()
 
@@ -882,7 +855,7 @@ function renderTemplates(): void {
 }
 
 function renderTemplateEditor(): void {
-  const selectedTemplate = selectedTemplateId ? store.roleTemplatesById[selectedTemplateId] : undefined
+  const selectedTemplate = appState.selectedTemplateId ? store.roleTemplatesById[appState.selectedTemplateId] : undefined
   templateFormTitleEl.textContent = selectedTemplate ? `编辑人员：${selectedTemplate.name}` : '新建人员'
   if (selectedTemplate) {
     const defaultChatSite = selectedTemplate.defaultChatSite ?? store.settings.defaultChatSite
@@ -903,7 +876,7 @@ function renderTemplateEditor(): void {
 }
 
 function openTemplateEditor(templateId?: string): void {
-  selectedTemplateId = templateId
+  appState.selectedTemplateId = templateId
   renderTemplateEditor()
   personTemplateModalEl.hidden = false
   templateNameEl.focus()
@@ -911,13 +884,13 @@ function openTemplateEditor(templateId?: string): void {
 
 function closeTemplateEditor(): void {
   personTemplateModalEl.hidden = true
-  selectedTemplateId = undefined
+  appState.selectedTemplateId = undefined
 }
 
 function openAddPersonDialog(): void {
   if (!getCurrentChat()) return
   addPersonModalEl.hidden = false
-  addPersonSiteMenuId = undefined
+  appState.addPersonSiteMenuId = undefined
   log.info('ui:person-add-dialog:open', { chatId: getCurrentChat()?.id, source: 'mixed' })
   renderAddPersonDialog()
 }
@@ -936,10 +909,10 @@ function closeTemporaryPersonDialog(): void {
 
 function roleCard(role: GroupRole): HTMLElement {
   const card = document.createElement('section')
-  card.className = `role-card${role.id === selectedRoleId ? ' active' : ''}`
+  card.className = `role-card${role.id === appState.selectedRoleId ? ' active' : ''}`
   card.addEventListener('click', () => {
-    selectedRoleId = role.id
-    roleSiteMenuRoleId = undefined
+    appState.selectedRoleId = role.id
+    appState.roleSiteMenuRoleId = undefined
     renderRolePanel()
   })
 
@@ -973,7 +946,7 @@ function roleCard(role: GroupRole): HTMLElement {
   more.textContent = '···'
   more.addEventListener('click', event => {
     event.stopPropagation()
-    roleSiteMenuRoleId = roleSiteMenuRoleId === role.id ? undefined : role.id
+    appState.roleSiteMenuRoleId = appState.roleSiteMenuRoleId === role.id ? undefined : role.id
     renderRolePanel()
   })
   card.append(avatar, main, more)
@@ -993,15 +966,15 @@ function roleSiteControl(role: GroupRole): HTMLElement {
   const sitePill = document.createElement('button')
   sitePill.type = 'button'
   sitePill.className = `site-pill site-pill-${role.chatSite ?? 'gemini'}`
-  sitePill.setAttribute('aria-expanded', String(roleSiteMenuRoleId === role.id))
+  sitePill.setAttribute('aria-expanded', String(appState.roleSiteMenuRoleId === role.id))
   sitePill.textContent = siteLabel(role.chatSite)
   sitePill.addEventListener('click', event => {
     event.stopPropagation()
-    roleSiteMenuRoleId = roleSiteMenuRoleId === role.id ? undefined : role.id
+    appState.roleSiteMenuRoleId = appState.roleSiteMenuRoleId === role.id ? undefined : role.id
     renderRolePanel()
   })
   control.append(sitePill)
-  if (roleSiteMenuRoleId === role.id) control.append(roleSiteMenu(role))
+  if (appState.roleSiteMenuRoleId === role.id) control.append(roleSiteMenu(role))
   return control
 }
 
@@ -1015,7 +988,7 @@ function roleSiteMenu(role: GroupRole): HTMLElement {
     option.className = `role-site-option${role.chatSite === site ? ' active' : ''}`
     option.textContent = role.chatSite === site ? `✓ ${siteLabel(site)}` : siteLabel(site)
     option.addEventListener('click', () => {
-      roleSiteMenuRoleId = undefined
+      appState.roleSiteMenuRoleId = undefined
       if (role.chatSite === site) {
         renderRolePanel()
         return
@@ -1130,8 +1103,8 @@ function renderAddPersonDialog(): void {
 function addPersonItems(): AddPersonItem[] {
   const libraryItems = getTemplates().map(template => {
     const key = `library:${template.id}`
-    const chatSite = addPersonSiteByKey.get(key) ?? template.defaultChatSite ?? store.settings.defaultChatSite
-    addPersonSiteByKey.set(key, chatSite)
+    const chatSite = appState.addPersonSiteByKey.get(key) ?? template.defaultChatSite ?? store.settings.defaultChatSite
+    appState.addPersonSiteByKey.set(key, chatSite)
     return {
       key,
       source: 'library' as const,
@@ -1141,10 +1114,10 @@ function addPersonItems(): AddPersonItem[] {
       chatSite,
     }
   })
-  const temporaryItems = temporaryPersonDrafts.map(draft => {
+  const temporaryItems = appState.temporaryPersonDrafts.map(draft => {
     const key = `temporary:${draft.id}`
-    const chatSite = addPersonSiteByKey.get(key) ?? draft.chatSite
-    addPersonSiteByKey.set(key, chatSite)
+    const chatSite = appState.addPersonSiteByKey.get(key) ?? draft.chatSite
+    appState.addPersonSiteByKey.set(key, chatSite)
     return {
       key,
       source: 'temporary' as const,
@@ -1164,16 +1137,16 @@ function addPersonSiteControl(itemKey: string, chatSite: ChatSite): HTMLElement 
   const sitePill = document.createElement('button')
   sitePill.type = 'button'
   sitePill.className = `site-pill site-pill-${chatSite}`
-  sitePill.setAttribute('aria-expanded', String(addPersonSiteMenuId === itemKey))
+  sitePill.setAttribute('aria-expanded', String(appState.addPersonSiteMenuId === itemKey))
   sitePill.textContent = siteLabel(chatSite)
   sitePill.addEventListener('click', event => {
     event.preventDefault()
     event.stopPropagation()
-    addPersonSiteMenuId = addPersonSiteMenuId === itemKey ? undefined : itemKey
+    appState.addPersonSiteMenuId = appState.addPersonSiteMenuId === itemKey ? undefined : itemKey
     renderAddPersonDialog()
   })
   control.append(sitePill)
-  if (addPersonSiteMenuId === itemKey) control.append(addPersonSiteMenu(itemKey, chatSite))
+  if (appState.addPersonSiteMenuId === itemKey) control.append(addPersonSiteMenu(itemKey, chatSite))
   return control
 }
 
@@ -1188,8 +1161,8 @@ function addPersonSiteMenu(itemKey: string, currentSite: ChatSite): HTMLElement 
     option.textContent = currentSite === site ? `✓ ${siteLabel(site)}` : siteLabel(site)
     option.addEventListener('click', event => {
       event.preventDefault()
-      addPersonSiteByKey.set(itemKey, site)
-      addPersonSiteMenuId = undefined
+      appState.addPersonSiteByKey.set(itemKey, site)
+      appState.addPersonSiteMenuId = undefined
       renderAddPersonDialog()
     })
     menu.append(option)
@@ -1264,24 +1237,24 @@ function textNode(content: string): Text {
 }
 
 function switchChat(chatId: string): void {
-  if (chatId === selectedChatId) {
-    chatMenuChatId = undefined
-    roleSiteMenuRoleId = undefined
+  if (chatId === appState.selectedChatId) {
+    appState.chatMenuChatId = undefined
+    appState.roleSiteMenuRoleId = undefined
     renderChatList()
     renderRolePanel()
     return
   }
-  selectedChatId = chatId
-  selectedRoleId = undefined
-  selectedReference = undefined
-  peopleDrawerOpen = false
-  chatMenuChatId = undefined
-  roleSiteMenuRoleId = undefined
+  appState.selectedChatId = chatId
+  appState.selectedRoleId = undefined
+  appState.selectedReference = undefined
+  appState.peopleDrawerOpen = false
+  appState.chatMenuChatId = undefined
+  appState.roleSiteMenuRoleId = undefined
   renderSelectedChat()
-  if (pendingSwitchAnimationFrame !== undefined) window.cancelAnimationFrame(pendingSwitchAnimationFrame)
-  pendingSwitchAnimationFrame = window.requestAnimationFrame(() => {
-    pendingSwitchAnimationFrame = undefined
-    if (selectedChatId !== chatId) return
+  if (appState.pendingSwitchAnimationFrame !== undefined) window.cancelAnimationFrame(appState.pendingSwitchAnimationFrame)
+  appState.pendingSwitchAnimationFrame = window.requestAnimationFrame(() => {
+    appState.pendingSwitchAnimationFrame = undefined
+    if (appState.selectedChatId !== chatId) return
     runCommand('GROUP_CHAT_SWITCH', { chatId })
       .catch(error => showError(error.message))
   })
@@ -1291,7 +1264,7 @@ async function reconnectRolesForSend(chat: GroupChat, roles: GroupRole[]): Promi
   const uniqueRoles = [...new Map(roles.map(role => [role.id, role])).values()]
   if (uniqueRoles.length === 0) return
 
-  for (const role of uniqueRoles) reconnectingRoleKeys.add(teamRoleKey(chat.id, role.id))
+  for (const role of uniqueRoles) appState.reconnectingRoleKeys.add(teamRoleKey(chat.id, role.id))
   renderComposerState()
 
   try {
@@ -1301,7 +1274,7 @@ async function reconnectRolesForSend(chat: GroupChat, roles: GroupRole[]): Promi
     await waitForRolesReady(chat.id, uniqueRoles.map(role => role.id))
     log.info('roles:auto-reconnect:ready', { chatId: chat.id, roleIds: uniqueRoles.map(role => role.id) })
   } finally {
-    for (const role of uniqueRoles) reconnectingRoleKeys.delete(teamRoleKey(chat.id, role.id))
+    for (const role of uniqueRoles) appState.reconnectingRoleKeys.delete(teamRoleKey(chat.id, role.id))
     renderComposerState()
   }
 }
@@ -1310,7 +1283,7 @@ function focusRoleFrame(chatId: string, roleId: string | undefined): void {
   if (!roleId) return
   setWindowMinimized(true)
   const chat = store.chatsById[chatId]
-  if (chat && selectedChatId !== chatId) switchChat(chatId)
+  if (chat && appState.selectedChatId !== chatId) switchChat(chatId)
   if (iframeHost.focusRoleFrame(chatId, roleId)) return
   const role = store.rolesById[roleId]
   if (!role) return
@@ -1341,7 +1314,7 @@ async function sendMessageAfterReconnect(chat: GroupChat, raw: string, reference
 
 function clearComposerAfterSend(raw: string, reference: MessageReference | undefined): void {
   if (messageInputEl.value.trim() === raw) messageInputEl.value = ''
-  if (selectedReference === reference) selectedReference = undefined
+  if (appState.selectedReference === reference) appState.selectedReference = undefined
   renderComposerState()
 }
 
@@ -1362,7 +1335,7 @@ async function submitComposerMessage(): Promise<void> {
     return
   }
 
-  const reference = selectedReference
+  const reference = appState.selectedReference
   const reconnectableRoles = targetResult.roles.filter(role => role.status !== 'ready' && shouldAutoReconnectRole(role))
   if (reconnectableRoles.length > 0) await reconnectRolesForSend(chat, reconnectableRoles)
 
@@ -1371,7 +1344,7 @@ async function submitComposerMessage(): Promise<void> {
 }
 
 function setReference(message: GroupMessage): void {
-  selectedReference = {
+  appState.selectedReference = {
     messageId: message.id,
     roleId: message.roleId,
     roleName: message.roleName,
@@ -1468,7 +1441,7 @@ function validatePersonDraft(draft: TemplateDraft): string | undefined {
 function selectedAddPersonItems(): Record<string, unknown>[] {
   const checkedKeys = new Set(Array.from(addLibraryPeopleListEl.querySelectorAll<HTMLInputElement>('input[type="checkbox"]:checked')).map(input => input.value))
   return addPersonItems().filter(item => checkedKeys.has(item.key)).map(item => {
-    const chatSite = addPersonSiteByKey.get(item.key) ?? item.chatSite
+    const chatSite = appState.addPersonSiteByKey.get(item.key) ?? item.chatSite
     if (item.source === 'library') return { source: 'library', roleTemplateId: item.roleTemplateId, chatSite }
     return {
       source: 'temporary',
@@ -1497,7 +1470,7 @@ async function addPeopleToCurrentChat(items: Record<string, unknown>[]): Promise
 function deleteTemplate(template: RoleTemplate): void {
   if (isTemplateUsed(template.id)) return
   if (!window.confirm(`确定删除「${template.name}」吗？删除后这个人员会从人员库移除。`)) return
-  if (selectedTemplateId === template.id) closeTemplateEditor()
+  if (appState.selectedTemplateId === template.id) closeTemplateEditor()
   runCommand('ROLE_TEMPLATE_DELETE', { templateId: template.id }).catch(error => showError(error.message))
 }
 
@@ -1637,7 +1610,7 @@ function registerUi(): void {
 
   requireElement<HTMLButtonElement>('#close-add-person').addEventListener('click', () => {
     addPersonModalEl.hidden = true
-    addPersonSiteMenuId = undefined
+    appState.addPersonSiteMenuId = undefined
   })
 
   requireElement<HTMLButtonElement>('#open-temporary-person').addEventListener('click', openTemporaryPersonDialog)
@@ -1645,12 +1618,12 @@ function registerUi(): void {
   requireElement<HTMLButtonElement>('#close-temporary-person').addEventListener('click', closeTemporaryPersonDialog)
 
   togglePeopleDrawerEl.addEventListener('click', () => {
-    peopleDrawerOpen = !peopleDrawerOpen
+    appState.peopleDrawerOpen = !appState.peopleDrawerOpen
     render()
   })
 
   requireElement<HTMLButtonElement>('#close-people-drawer').addEventListener('click', () => {
-    peopleDrawerOpen = false
+    appState.peopleDrawerOpen = false
     render()
   })
 
@@ -1659,16 +1632,16 @@ function registerUi(): void {
       settingsMenuEl.hidden = true
       settingsButtonEl.setAttribute('aria-expanded', 'false')
     }
-    if (chatMenuChatId && !(event.target as Element | null)?.closest('.chat-action-menu, .chat-menu-btn')) {
-      chatMenuChatId = undefined
+    if (appState.chatMenuChatId && !(event.target as Element | null)?.closest('.chat-action-menu, .chat-menu-btn')) {
+      appState.chatMenuChatId = undefined
       renderChatList()
     }
-    if (roleSiteMenuRoleId && !(event.target as Element | null)?.closest('.role-site-menu, .site-pill, .role-more')) {
-      roleSiteMenuRoleId = undefined
+    if (appState.roleSiteMenuRoleId && !(event.target as Element | null)?.closest('.role-site-menu, .site-pill, .role-more')) {
+      appState.roleSiteMenuRoleId = undefined
       renderRolePanel()
     }
-    if (addPersonSiteMenuId && !(event.target as Element | null)?.closest('.role-site-menu, .site-pill')) {
-      addPersonSiteMenuId = undefined
+    if (appState.addPersonSiteMenuId && !(event.target as Element | null)?.closest('.role-site-menu, .site-pill')) {
+      appState.addPersonSiteMenuId = undefined
       renderAddPersonDialog()
     }
   })
@@ -1681,10 +1654,10 @@ function registerUi(): void {
     personTemplateModalEl.hidden = true
     addPersonModalEl.hidden = true
     temporaryPersonModalEl.hidden = true
-    selectedTemplateId = undefined
-    chatMenuChatId = undefined
-    roleSiteMenuRoleId = undefined
-    addPersonSiteMenuId = undefined
+    appState.selectedTemplateId = undefined
+    appState.chatMenuChatId = undefined
+    appState.roleSiteMenuRoleId = undefined
+    appState.addPersonSiteMenuId = undefined
     renderChatList()
     renderRolePanel()
   })
@@ -1717,12 +1690,12 @@ function registerUi(): void {
 
   requireElement<HTMLFormElement>('#composer').addEventListener('submit', event => {
     event.preventDefault()
-    if (sendButtonEl.disabled && reconnectingRoleKeys.size > 0) return
+    if (sendButtonEl.disabled && appState.reconnectingRoleKeys.size > 0) return
     submitComposerMessage().catch(error => showError(error instanceof Error ? error.message : String(error)))
   })
 
   messageInputEl.addEventListener('input', () => {
-    mentionIndex = 0
+    appState.mentionIndex = 0
     renderComposerState()
   })
   messageInputEl.addEventListener('keyup', () => renderComposerState())
@@ -1731,15 +1704,15 @@ function registerUi(): void {
     if (!mentionPanelEl.hidden) {
       if (event.key === 'ArrowDown') {
         event.preventDefault()
-        mentionIndex = (mentionIndex + 1) % roles.length
+        appState.mentionIndex = (appState.mentionIndex + 1) % roles.length
         renderMentionPanel()
       } else if (event.key === 'ArrowUp') {
         event.preventDefault()
-        mentionIndex = (mentionIndex - 1 + roles.length) % roles.length
+        appState.mentionIndex = (appState.mentionIndex - 1 + roles.length) % roles.length
         renderMentionPanel()
       } else if (shouldConfirmMentionWithEnter(event)) {
         event.preventDefault()
-        const role = roles[mentionIndex]
+        const role = roles[appState.mentionIndex]
         if (role) insertMention(role)
       } else if (event.key === 'Escape') {
         mentionPanelEl.hidden = true
@@ -1763,8 +1736,8 @@ function registerUi(): void {
     addPeopleToCurrentChat(selectedAddPersonItems())
       .then(() => {
         addPersonModalEl.hidden = true
-        addPersonSiteMenuId = undefined
-        temporaryPersonDrafts.splice(0)
+        appState.addPersonSiteMenuId = undefined
+        appState.temporaryPersonDrafts.splice(0)
       })
       .catch(error => showError(error.message))
   })
@@ -1782,8 +1755,8 @@ function registerUi(): void {
       return
     }
     const id = `temporary-${Date.now()}-${Math.random().toString(16).slice(2)}`
-    temporaryPersonDrafts.push({ id, ...draft, chatSite: store.settings.defaultChatSite })
-    addPersonSiteByKey.set(`temporary:${id}`, store.settings.defaultChatSite)
+    appState.temporaryPersonDrafts.push({ id, ...draft, chatSite: store.settings.defaultChatSite })
+    appState.addPersonSiteByKey.set(`temporary:${id}`, store.settings.defaultChatSite)
     closeTemporaryPersonDialog()
     renderAddPersonDialog()
   })
@@ -1796,15 +1769,15 @@ function registerUi(): void {
       showError(validationError)
       return
     }
-    const type = selectedTemplateId ? 'ROLE_TEMPLATE_UPDATE' : 'ROLE_TEMPLATE_CREATE'
-    const payload = selectedTemplateId ? { templateId: selectedTemplateId, ...draft } : draft
+    const type = appState.selectedTemplateId ? 'ROLE_TEMPLATE_UPDATE' : 'ROLE_TEMPLATE_CREATE'
+    const payload = appState.selectedTemplateId ? { templateId: appState.selectedTemplateId, ...draft } : draft
     runCommand(type, payload)
       .then(closeTemplateEditor)
       .catch(error => showError(error.message))
   })
 
   requireElement<HTMLButtonElement>('#open-gemini-login').addEventListener('click', () => {
-    const site: ChatSite = store.rolesById[selectedRoleId ?? '']?.chatSite ?? store.settings.defaultChatSite
+    const site: ChatSite = store.rolesById[appState.selectedRoleId ?? '']?.chatSite ?? store.settings.defaultChatSite
     chrome.tabs.create({ url: getDefaultChatSiteUrl(site) }).catch(error => showError(error instanceof Error ? error.message : String(error)))
   })
 }
