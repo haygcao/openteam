@@ -19,6 +19,9 @@ const RESPONSE_FINAL_SETTLE_MS = 1500
 const RESPONSE_GENERATING_STABLE_GRACE_MS = 8000
 const REPLY_POLL_INTERVAL_MS = 2000
 const REPLY_TIMEOUT_MS = 120000
+const LONG_REPLY_TEXT_LENGTH = 160
+const SHORT_COPY_TEXT_LENGTH = 40
+const MIN_COPY_TO_DOM_TEXT_RATIO = 0.2
 
 export interface ReplyObserverController {
   capturePromptReplyBaseline(messageId: string | undefined): void
@@ -259,7 +262,13 @@ export function createReplyObserver(options: {
     try {
       const copiedText = await siteAdapter.readResponseTextFromCopy?.(element)
       const trimmedCopiedText = copiedText?.trim()
-      if (trimmedCopiedText) return { text: trimmedCopiedText, contentFormat: 'markdown' }
+      if (trimmedCopiedText && !isSuspiciousCopiedReply(trimmedCopiedText, fallbackText)) return { text: trimmedCopiedText, contentFormat: 'markdown' }
+      if (trimmedCopiedText) {
+        log.warn('reply-copy:ignored-suspicious-short-text', {
+          copiedLength: normalizeReplyForLengthCheck(trimmedCopiedText).length,
+          domTextLength: normalizeReplyForLengthCheck(fallbackText).length,
+        })
+      }
     } catch (error) {
       log.warn('reply-copy:failed', { error: error instanceof Error ? error.message : String(error) })
     }
@@ -272,6 +281,18 @@ export function createReplyObserver(options: {
     }
 
     return { text: fallbackText }
+  }
+
+  function isSuspiciousCopiedReply(copiedText: string, fallbackText: string): boolean {
+    const copiedLength = normalizeReplyForLengthCheck(copiedText).length
+    const fallbackLength = normalizeReplyForLengthCheck(fallbackText).length
+    if (fallbackLength < LONG_REPLY_TEXT_LENGTH) return false
+    if (copiedLength < SHORT_COPY_TEXT_LENGTH) return true
+    return copiedLength / fallbackLength < MIN_COPY_TO_DOM_TEXT_RATIO
+  }
+
+  function normalizeReplyForLengthCheck(text: string): string {
+    return text.replace(/\s+/g, '')
   }
 
   function observeResponseContainers(onStableText: (text: string, element: Element) => void): void {

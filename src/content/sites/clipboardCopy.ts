@@ -12,11 +12,11 @@ export async function readResponseTextFromCopyAction(options: {
   const clipboard = navigator.clipboard
   if (!copyButton || !clipboard?.readText) return undefined
 
-  let previousText: string | undefined
+  let previousText: string
   try {
     previousText = await clipboard.readText()
   } catch {
-    previousText = undefined
+    return undefined
   }
 
   try {
@@ -26,7 +26,7 @@ export async function readResponseTextFromCopyAction(options: {
   } catch {
     return undefined
   } finally {
-    if (previousText !== undefined && clipboard.writeText) {
+    if (clipboard.writeText) {
       clipboard.writeText(previousText).catch(() => undefined)
     }
   }

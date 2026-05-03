@@ -1199,10 +1199,7 @@ select:focus {
 
 .composer {
   position: relative;
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 8px 12px;
-  align-items: end;
+  display: block;
   margin: 0 22px 18px;
   padding: 14px 14px 12px;
   border: 1px solid rgba(132, 153, 171, 0.22);
@@ -1281,12 +1278,11 @@ select:focus {
 #message-input {
   min-height: 98px;
   max-height: 150px;
-  grid-column: 1;
-  grid-row: 1;
+  width: 100%;
   border: 0;
   background: transparent;
   resize: none;
-  padding: 10px 2px;
+  padding: 10px 56px 10px 2px;
 }
 
 #message-input:focus {
@@ -1294,9 +1290,12 @@ select:focus {
 }
 
 .composer-actions {
-  grid-column: 2;
-  grid-row: 1;
-  width: auto;
+  position: absolute;
+  right: 14px;
+  bottom: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
 }
 
 .composer-actions > div {
