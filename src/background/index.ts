@@ -1,11 +1,11 @@
 import { loadStore } from '../group/store'
-import type { GroupChat, GroupRole, OpenTeamStore } from '../group/types'
+import type { GroupChat, OpenTeamStore } from '../group/types'
 import { createChatHandlers } from './chatHandlers'
+import { createLegacyHandlers, toLegacyState } from './legacyAdapter'
 import { createMessageHandlers } from './messageHandlers'
 import {
   broadcastStoreUpdated as broadcastRuntimeStoreUpdated,
   forgetHostTab,
-  listHostTabIds,
   rememberHost,
   sendError,
   type RuntimeMessage,
@@ -14,7 +14,7 @@ import { createMessageRouter } from './messageRouter'
 import { createPromptSender } from './promptDelivery'
 import { createRoleHandlers } from './roleHandlers'
 import { createRuntimeFrameRegistry } from './runtimeFrames'
-import { getChatMessages, getChatRoles, mutateStore } from './storeAccess'
+import { getChatRoles, mutateStore } from './storeAccess'
 
 const runtimeFrames = createRuntimeFrameRegistry()
 
@@ -45,7 +45,7 @@ function newId(prefix: string): string {
 }
 
 async function broadcastStoreUpdated(store: OpenTeamStore, excludeTabId?: number): Promise<void> {
-  await broadcastRuntimeStoreUpdated(store, { excludeTabId, legacyState: toLegacyState(store) })
+  await broadcastRuntimeStoreUpdated(store, { excludeTabId, legacyState: toLegacyState(store, runtimeFrames) })
 }
 
 function getChatStatusFromRoles(store: OpenTeamStore, chat: GroupChat): GroupChat['status'] {
@@ -59,7 +59,7 @@ function getChatStatusFromRoles(store: OpenTeamStore, chat: GroupChat): GroupCha
 async function handleStoreGet(message: RuntimeMessage, sender: chrome.runtime.MessageSender) {
   rememberHost(sender, message.hostTabId)
   const store = await loadStore()
-  return { ok: true, store, state: toLegacyState(store), bindings: runtimeFrames.list() }
+  return { ok: true, store, state: toLegacyState(store, runtimeFrames), bindings: runtimeFrames.list() }
 }
 
 async function handleSettingsUpdate(message: RuntimeMessage) {
@@ -73,79 +73,18 @@ async function handleSettingsUpdate(message: RuntimeMessage) {
   return { ok: true, store }
 }
 
-function toLegacyState(store: OpenTeamStore) {
-  const chat = store.currentChatId ? store.chatsById[store.currentChatId] : undefined
-  const roles = chat ? getChatRoles(store, chat).map(role => ({
-    id: role.id,
-    name: role.name,
-    tabId: runtimeFrames.getByRole(chat.id, role.id)?.tabId ?? -1,
-    frameId: runtimeFrames.getByRole(chat.id, role.id)?.frameId,
-    conversationId: role.geminiConversationId ?? '__default__',
-    status: legacyStatus(role.status),
-    createdAt: role.createdAt,
-    lastMessageAt: role.lastReplyAt,
-  })) : []
-  const messages = chat ? getChatMessages(store, chat).map(message => ({
-    id: message.id,
-    roomId: chat.id,
-    roleId: message.roleId,
-    roleName: message.roleName,
-    from: message.type === 'assistant' ? 'role' : message.type,
-    target: message.targetRoleIds && message.targetRoleIds.length > 0 ? message.targetRoleIds.length === roles.length ? 'all' : 'role' : 'none',
-    targetRoleName: message.targetRoleIds?.length === 1 ? store.rolesById[message.targetRoleIds[0]]?.name : undefined,
-    content: message.content,
-    createdAt: message.createdAt,
-    status: message.status,
-  })) : []
-
-  return { roomId: chat?.id ?? 'group-empty', hostTabId: listHostTabIds()[0] ?? -1, roles, messages }
-}
-
-function legacyStatus(status: GroupRole['status']): string {
-  if (status === 'pending' || status === 'loading') return 'opening'
-  if (status === 'ready') return 'idle'
-  if (status === 'thinking') return 'generating'
-  return 'error'
-}
-
 function readOptionalString(value: unknown): string | undefined {
   return typeof value === 'string' ? value.trim() || undefined : undefined
 }
 
-async function handleLegacyHostReady(message: RuntimeMessage, sender: chrome.runtime.MessageSender) {
-  rememberHost(sender, message.hostTabId)
-  const store = await loadStore()
-  return { ok: true, store, state: toLegacyState(store) }
-}
-
-async function handleLegacyCreateRole(message: RuntimeMessage) {
-  const store = await loadStore()
-  let chatId = store.currentChatId
-  if (!chatId) {
-    const created = await routeMessage({ type: 'GROUP_CHAT_CREATE', name: 'OpenTeam', mode: 'independent' }, {}) as { chat: GroupChat }
-    chatId = created.chat.id
-  }
-
-  return routeMessage({ type: 'GROUP_ROLE_CREATE', chatId, name: message.name }, {})
-}
-
+const routeLegacyMessage = (message: RuntimeMessage, sender: chrome.runtime.MessageSender) => routeMessage(message, sender)
 const routeMessage = createMessageRouter([
   { type: 'GROUP_STORE_GET', handler: handleStoreGet },
   ...createChatHandlers({ broadcastStoreUpdated, getChatStatusFromRoles, log, newId, now, runtimeFrames }),
   { type: 'GROUP_SETTINGS_UPDATE', handler: handleSettingsUpdate },
   ...createRoleHandlers({ broadcastStoreUpdated, log, newId, now, runtimeFrames, sendPrompt }),
   ...createMessageHandlers({ broadcastStoreUpdated, getChatStatusFromRoles, log, newId, now, runtimeFrames, sendError, sendPrompt }),
-  { type: 'TEAM_HOST_READY', handler: handleLegacyHostReady },
-  { type: 'TEAM_GET_STATE', handler: handleLegacyHostReady },
-  { type: 'TEAM_CREATE_ROLE', handler: handleLegacyCreateRole },
-  {
-    type: 'TEAM_SEND_MESSAGE',
-    handler: async message => {
-      const store = await loadStore()
-      if (!store.currentChatId) return { ok: false, error: '请先创建群聊' }
-      return routeMessage({ type: 'GROUP_MESSAGE_SEND', chatId: store.currentChatId, raw: message.raw }, {})
-    },
-  },
+  ...createLegacyHandlers({ log, routeMessage: routeLegacyMessage, runtimeFrames }),
 ])
 
 chrome.runtime.onInstalled.addListener(() => {
