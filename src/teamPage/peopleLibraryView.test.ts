@@ -38,6 +38,9 @@ function makeChat(id: string): GroupChat {
 function setupPeopleLibraryView(options: { store: OpenTeamStore; templates: RoleTemplate[]; currentChat?: GroupChat }) {
   const addLibraryPeopleListEl = document.createElement('div')
   const addLibraryPeopleFormEl = document.createElement('form')
+  const peopleLibrarySearchEl = document.createElement('input')
+  const peopleLibraryBuiltinTabEl = document.createElement('button')
+  const peopleLibraryCustomTabEl = document.createElement('button')
   const addPersonSearchEl = document.createElement('input')
   const addPersonBuiltinTabEl = document.createElement('button')
   const addPersonCustomTabEl = document.createElement('button')
@@ -51,6 +54,11 @@ function setupPeopleLibraryView(options: { store: OpenTeamStore; templates: Role
   const templateDescriptionEl = document.createElement('textarea')
   const templatePromptEl = document.createElement('textarea')
   const peopleLibraryFormEl = document.createElement('form')
+  const builtinTemplateDetailModalEl = Object.assign(document.createElement('div'), { hidden: true })
+  const builtinTemplateDetailTitleEl = document.createElement('div')
+  const builtinTemplateDetailMetaEl = document.createElement('div')
+  const builtinTemplateDetailPromptEl = document.createElement('pre')
+  const closeBuiltinTemplateDetailEl = document.createElement('button')
   const runCommand = vi.fn(async () => undefined)
   const view = createPeopleLibraryView({
     state: createTeamPageState(),
@@ -66,10 +74,18 @@ function setupPeopleLibraryView(options: { store: OpenTeamStore; templates: Role
     peopleLibrarySummaryEl: document.createElement('div'),
     peopleLibraryListEl,
     peopleLibraryPaginationEl,
+    peopleLibrarySearchEl,
+    peopleLibraryBuiltinTabEl,
+    peopleLibraryCustomTabEl,
     addLibraryPeopleListEl,
     addPersonSearchEl,
     addPersonBuiltinTabEl,
     addPersonCustomTabEl,
+    builtinTemplateDetailModalEl,
+    builtinTemplateDetailTitleEl,
+    builtinTemplateDetailMetaEl,
+    builtinTemplateDetailPromptEl,
+    closeBuiltinTemplateDetailEl,
     roleTemplateSelectEl: document.createElement('select'),
     templateListEl,
     templateNameEl,
@@ -111,9 +127,17 @@ function setupPeopleLibraryView(options: { store: OpenTeamStore; templates: Role
     view,
     addLibraryPeopleFormEl,
     addLibraryPeopleListEl,
+    peopleLibrarySearchEl,
+    peopleLibraryBuiltinTabEl,
+    peopleLibraryCustomTabEl,
     addPersonSearchEl,
     addPersonBuiltinTabEl,
     addPersonCustomTabEl,
+    builtinTemplateDetailModalEl,
+    builtinTemplateDetailTitleEl,
+    builtinTemplateDetailMetaEl,
+    builtinTemplateDetailPromptEl,
+    closeBuiltinTemplateDetailEl,
     peopleLibraryListEl,
     peopleLibraryPaginationEl,
     runCommand,
@@ -275,7 +299,7 @@ describe('team page people library view boundary', () => {
     })
   })
 
-  it('renders built-in and custom template type badges and hides built-in delete actions', () => {
+  it('filters the people library by built-in and custom tabs', () => {
     const builtinTemplate: RoleTemplate = {
       id: 'builtin-frankl',
       type: 'builtin',
@@ -292,16 +316,97 @@ describe('team page people library view boundary', () => {
       roleTemplateOrder: [customTemplate.id],
       roleTemplatesById: { [customTemplate.id]: customTemplate },
     }
-    const { view, peopleLibraryListEl } = setupPeopleLibraryView({ store, templates: [builtinTemplate, customTemplate] })
+    const { view, peopleLibraryListEl, peopleLibraryBuiltinTabEl, peopleLibraryCustomTabEl } = setupPeopleLibraryView({ store, templates: [builtinTemplate, customTemplate] })
 
+    view.registerPeopleLibraryEvents()
     view.renderTemplates()
 
-    const cards = peopleLibraryListEl.querySelectorAll('.template-card')
-    expect(cards).toHaveLength(2)
-    expect(cards[0].textContent).toContain('内置')
-    expect(cards[0].querySelector('.template-delete')).toBeNull()
-    expect(cards[1].textContent).toContain('自定义')
-    expect(cards[1].querySelector('.template-delete')).toBeDefined()
+    expect(peopleLibraryListEl.textContent).toContain('弗兰克尔')
+    expect(peopleLibraryListEl.textContent).toContain('内置')
+    expect(peopleLibraryListEl.textContent).not.toContain('人员1')
+    expect(peopleLibraryBuiltinTabEl.className).toContain('active')
+    expect(peopleLibraryListEl.querySelector('.template-delete')).toBeNull()
+
+    peopleLibraryCustomTabEl.click()
+    expect(peopleLibraryListEl.textContent).toContain('人员1')
+    expect(peopleLibraryListEl.textContent).toContain('自定义')
+    expect(peopleLibraryListEl.textContent).not.toContain('弗兰克尔')
+    expect(peopleLibraryCustomTabEl.className).toContain('active')
+    expect(peopleLibraryListEl.querySelector('.template-delete')).toBeDefined()
+  })
+
+  it('searches people library entries by name, description, and persona text', () => {
+    const franklTemplate: RoleTemplate = {
+      id: 'builtin-frankl',
+      type: 'builtin',
+      name: '弗兰克尔',
+      description: '意义顾问',
+      defaultChatSite: 'gemini',
+      systemPrompt: '苦难中的尊严',
+      createdAt: 0,
+      updatedAt: 0,
+    }
+    const camusTemplate: RoleTemplate = {
+      id: 'builtin-camus',
+      type: 'builtin',
+      name: '加缪',
+      description: '清醒生活',
+      defaultChatSite: 'gemini',
+      systemPrompt: '荒诞与反抗',
+      createdAt: 0,
+      updatedAt: 0,
+    }
+    const store = createDefaultStore()
+    const { view, peopleLibraryListEl, peopleLibrarySearchEl, peopleLibraryPaginationEl } = setupPeopleLibraryView({ store, templates: [franklTemplate, camusTemplate] })
+
+    view.registerPeopleLibraryEvents()
+    view.renderTemplates()
+    peopleLibrarySearchEl.value = '荒诞'
+    peopleLibrarySearchEl.dispatchEvent(new Event('input', { bubbles: true }))
+
+    expect(peopleLibraryListEl.textContent).toContain('加缪')
+    expect(peopleLibraryListEl.textContent).not.toContain('弗兰克尔')
+    expect(peopleLibraryPaginationEl.textContent).toBe('')
+
+    peopleLibrarySearchEl.value = '没有这个人'
+    peopleLibrarySearchEl.dispatchEvent(new Event('input', { bubbles: true }))
+    expect(peopleLibraryListEl.textContent).toContain('没有匹配的内置人员')
+  })
+
+  it('opens a read-only prompt detail modal for built-in people', () => {
+    const builtinTemplate: RoleTemplate = {
+      id: 'builtin-frankl',
+      type: 'builtin',
+      name: '弗兰克尔',
+      description: '意义顾问',
+      defaultChatSite: 'gemini',
+      systemPrompt: '你是「弗兰克尔式意义顾问」。\n必须区分事实、判断和行动建议。',
+      createdAt: 0,
+      updatedAt: 0,
+    }
+    const store = createDefaultStore()
+    const {
+      view,
+      peopleLibraryListEl,
+      builtinTemplateDetailModalEl,
+      builtinTemplateDetailTitleEl,
+      builtinTemplateDetailMetaEl,
+      builtinTemplateDetailPromptEl,
+      closeBuiltinTemplateDetailEl,
+    } = setupPeopleLibraryView({ store, templates: [builtinTemplate] })
+
+    view.registerPeopleLibraryEvents()
+    view.renderTemplates()
+    peopleLibraryListEl.querySelector<HTMLButtonElement>('.template-detail')!.click()
+
+    expect(builtinTemplateDetailModalEl.hidden).toBe(false)
+    expect(builtinTemplateDetailTitleEl.textContent).toBe('弗兰克尔')
+    expect(builtinTemplateDetailMetaEl.textContent).toContain('内置人员')
+    expect(builtinTemplateDetailPromptEl.textContent).toContain('弗兰克尔式意义顾问')
+    expect(builtinTemplateDetailPromptEl.textContent).toContain('必须区分事实、判断和行动建议')
+
+    closeBuiltinTemplateDetailEl.click()
+    expect(builtinTemplateDetailModalEl.hidden).toBe(true)
   })
 
   it('filters add-person choices by built-in and custom tabs', () => {

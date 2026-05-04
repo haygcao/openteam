@@ -66,10 +66,18 @@ export interface TeamPageDomRefs {
   peopleLibrarySummaryEl: HTMLElement
   peopleLibraryListEl: HTMLElement
   peopleLibraryPaginationEl: HTMLElement
+  peopleLibrarySearchEl: HTMLInputElement
+  peopleLibraryBuiltinTabEl: HTMLButtonElement
+  peopleLibraryCustomTabEl: HTMLButtonElement
   addLibraryPeopleListEl: HTMLElement
   addPersonSearchEl: HTMLInputElement
   addPersonBuiltinTabEl: HTMLButtonElement
   addPersonCustomTabEl: HTMLButtonElement
+  builtinTemplateDetailModalEl: HTMLElement
+  builtinTemplateDetailTitleEl: HTMLElement
+  builtinTemplateDetailMetaEl: HTMLElement
+  builtinTemplateDetailPromptEl: HTMLElement
+  closeBuiltinTemplateDetailEl: HTMLButtonElement
   newTemplateEl: HTMLButtonElement
   closePersonTemplateEl: HTMLButtonElement
   closeAddPersonEl: HTMLButtonElement
@@ -171,10 +179,18 @@ export function createTeamPageDomRefs(): TeamPageDomRefs {
     peopleLibrarySummaryEl: requireElement<HTMLElement>('#people-library-summary'),
     peopleLibraryListEl: requireElement<HTMLElement>('#people-library-list'),
     peopleLibraryPaginationEl: requireElement<HTMLElement>('#people-library-pagination'),
+    peopleLibrarySearchEl: requireElement<HTMLInputElement>('#people-library-search'),
+    peopleLibraryBuiltinTabEl: requireElement<HTMLButtonElement>('#people-library-tab-builtin'),
+    peopleLibraryCustomTabEl: requireElement<HTMLButtonElement>('#people-library-tab-custom'),
     addLibraryPeopleListEl: requireElement<HTMLElement>('#add-library-people-list'),
     addPersonSearchEl: requireElement<HTMLInputElement>('#add-person-search'),
     addPersonBuiltinTabEl: requireElement<HTMLButtonElement>('#add-person-tab-builtin'),
     addPersonCustomTabEl: requireElement<HTMLButtonElement>('#add-person-tab-custom'),
+    builtinTemplateDetailModalEl: requireElement<HTMLElement>('#builtin-template-detail-modal'),
+    builtinTemplateDetailTitleEl: requireElement<HTMLElement>('#builtin-template-detail-title'),
+    builtinTemplateDetailMetaEl: requireElement<HTMLElement>('#builtin-template-detail-meta'),
+    builtinTemplateDetailPromptEl: requireElement<HTMLElement>('#builtin-template-detail-prompt'),
+    closeBuiltinTemplateDetailEl: requireElement<HTMLButtonElement>('#close-builtin-template-detail'),
     newTemplateEl: requireElement<HTMLButtonElement>('#new-template'),
     closePersonTemplateEl: requireElement<HTMLButtonElement>('#close-person-template'),
     closeAddPersonEl: requireElement<HTMLButtonElement>('#close-add-person'),

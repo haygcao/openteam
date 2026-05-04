@@ -2143,6 +2143,12 @@ select:focus {
   overflow: hidden;
 }
 
+.people-library-toolbar {
+  display: grid;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
 #people-library-list {
   max-height: calc(100vh - 220px);
   overflow: auto;
@@ -2223,6 +2229,25 @@ select:focus {
 
 .template-editor-modal {
   width: min(520px, 100%);
+}
+
+.template-detail-modal {
+  width: min(720px, 100%);
+}
+
+.template-prompt-preview {
+  max-height: min(520px, calc(100vh - 190px));
+  margin: 0;
+  overflow: auto;
+  border: 1px solid rgba(132, 153, 171, 0.16);
+  border-radius: 8px;
+  padding: 14px;
+  background: rgba(3, 9, 14, 0.72);
+  color: #dceaf2;
+  font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.65;
+  white-space: pre-wrap;
 }
 
 .modal-header {
