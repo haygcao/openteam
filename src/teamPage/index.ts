@@ -8,6 +8,7 @@ import { createTeamPageDomRefs } from './domRefs'
 import { createFloatingWindowControls } from './floatingWindow'
 import { createIframeHost } from './iframeHost'
 import { createMessagesView } from './messagesView'
+import { createNotesView } from './notesView'
 import { createPeopleLibraryView } from './peopleLibraryView'
 import { createRoleRecoveryController } from './roleRecoveryController'
 import { createRolePanelView } from './rolePanelView'
@@ -26,6 +27,8 @@ const { roleSummaryEl, roleListEl, roleTemplateSelectEl, templateListEl, targetP
 const { messageInputEl, referenceDraftEl, mentionPanelEl, errorEl, newChatNameEl, createChatFormEl, quickCreateChatEl } = teamDomRefs
 const { templateNameEl, templateDescriptionEl, templatePromptEl, templateFormTitleEl, settingsButtonEl, settingsMenuEl } = teamDomRefs
 const { openPeopleLibraryEl, closePeopleLibraryEl, peopleLibraryModalEl, personTemplateModalEl, addPersonModalEl, temporaryPersonModalEl } = teamDomRefs
+const { notesPanelEl, toggleNotesPanelEl, closeNotesPanelEl, globalNoteTabEl, chatNoteTabEl, notesEditorEl } = teamDomRefs
+const { noteBoldEl, noteItalicEl, noteStrikeEl, noteBulletListEl, noteOrderedListEl, noteUndoEl, noteRedoEl } = teamDomRefs
 const { peopleLibrarySummaryEl, peopleLibraryListEl, peopleLibraryPaginationEl, addLibraryPeopleListEl, newTemplateEl, closePersonTemplateEl, closeAddPersonEl } = teamDomRefs
 const { openTemporaryPersonEl, closeTemporaryPersonEl, addRoleFormEl, addLibraryPeopleFormEl, addTemporaryPersonFormEl, peopleLibraryFormEl } = teamDomRefs
 const { templateSiteGeminiEl, templateSiteChatGptEl, templateSiteClaudeEl, templateSiteDeepSeekEl, templateSiteQwenEl, templateSiteKimiEl, templateChatGptGptsFieldEl, templateChatGptGptsUrlEl, temporaryPersonNameEl, temporaryPersonDescriptionEl, temporaryPersonPromptEl } = teamDomRefs
@@ -50,6 +53,7 @@ const sendRuntimeMessage = runtimeClient.sendRuntimeMessage
 const runCommand = runtimeClient.runCommand
 let renderComposerState = (): void => {}
 let insertMention = (_role: GroupRole): void => {}
+let insertTextIntoActiveNote = (_text: string): void => {}
 const floatingWindowControls = createFloatingWindowControls({
   appShellEl,
   floatingDragHandleEl,
@@ -147,6 +151,31 @@ renderComposerState = composerView.renderComposerState
 insertMention = composerView.insertMention
 const registerComposerEvents = composerView.registerComposerEvents
 const setReference = composerView.setReference
+const notesView = createNotesView({
+  state: appState,
+  notesPanelEl,
+  toggleNotesPanelEl,
+  closeNotesPanelEl,
+  globalNoteTabEl,
+  chatNoteTabEl,
+  notesEditorEl,
+  noteToolbarButtons: {
+    bold: noteBoldEl,
+    italic: noteItalicEl,
+    strike: noteStrikeEl,
+    bulletList: noteBulletListEl,
+    orderedList: noteOrderedListEl,
+    undo: noteUndoEl,
+    redo: noteRedoEl,
+  },
+  getStore: () => store,
+  getCurrentChat,
+  runCommand,
+  showError,
+})
+const renderNotes = notesView.renderNotes
+const registerNotesEvents = notesView.registerNotesEvents
+insertTextIntoActiveNote = notesView.insertTextIntoActiveNote
 const peopleLibraryView = createPeopleLibraryView({
   state: appState,
   getStore: () => store,
@@ -215,6 +244,7 @@ const messagesView = createMessagesView({
   focusRoleFrame,
   insertMention,
   setReference,
+  insertTextIntoActiveNote,
   retryRoleReply,
   stopRoleReply,
   runCommand,
@@ -334,6 +364,7 @@ function renderSelectedChat(): void {
   renderMessages()
   renderComposerState()
   renderRolePanel()
+  renderNotes()
 }
 
 function registerRuntimePush(): void {
@@ -358,6 +389,7 @@ async function boot(): Promise<void> {
   registerRuntimePush()
   registerFloatingWindowControls()
   registerUi()
+  registerNotesEvents()
   render()
   await refreshStore(false)
 }

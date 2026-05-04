@@ -25,6 +25,8 @@ export interface TeamPageState {
   chatMenuChatId?: string
   roleSiteMenuRoleId?: string
   addPersonSiteMenuId?: string
+  notesPanelOpen: boolean
+  activeNoteScope: 'global' | 'chat'
   peopleLibraryPage: number
   pendingSwitchAnimationFrame?: number
   thinkingTimeoutTimers: number[]
@@ -49,5 +51,7 @@ export function createTeamPageState(): TeamPageState {
     temporaryPersonDrafts: [],
     addPersonSiteByKey: new Map<string, Set<ChatSite>>(),
     peopleLibraryPage: 0,
+    notesPanelOpen: false,
+    activeNoteScope: 'chat',
   }
 }

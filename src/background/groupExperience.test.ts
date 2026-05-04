@@ -141,6 +141,62 @@ describe('background group chat experience handlers', () => {
     expect(deleted.store.roleTemplateOrder).toEqual(['template-used'])
   })
 
+  it('saves rich note documents for global and chat scopes', async () => {
+    const store = makeStore()
+    store.chatsById['chat-1'] = makeChat('chat-1')
+    store.chatOrder = ['chat-1']
+    const harness = await setupBackground(store)
+    const globalNote = { type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text: '随手记录' }] }] }
+    const chatNote = { type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text: '群聊沉淀' }] }] }
+
+    const globalSaved = await harness.invoke({ type: 'GROUP_NOTE_SAVE', scope: 'global', content: globalNote }) as { ok: boolean; store: OpenTeamStore }
+    const chatSaved = await harness.invoke({ type: 'GROUP_NOTE_SAVE', scope: 'chat', chatId: 'chat-1', content: chatNote }) as { ok: boolean; store: OpenTeamStore }
+
+    expect(globalSaved.ok).toBe(true)
+    expect(globalSaved.store.globalNote).toEqual(globalNote)
+    expect(chatSaved.ok).toBe(true)
+    expect(chatSaved.store.chatNotesById?.['chat-1']).toEqual(chatNote)
+  })
+
+  it('stores message highlights without changing the original message content', async () => {
+    const store = makeStore()
+    const chat = makeChat('chat-1')
+    chat.messageIds = ['msg-1']
+    chat.nextMessageSeq = 2
+    store.chatsById['chat-1'] = chat
+    store.chatOrder = ['chat-1']
+    store.messagesById['msg-1'] = {
+      id: 'msg-1',
+      chatId: 'chat-1',
+      seq: 1,
+      type: 'assistant',
+      content: '这里有一段重点内容',
+      createdAt: 1,
+      status: 'received',
+    }
+    const harness = await setupBackground(store)
+
+    const response = await harness.invoke({
+      type: 'GROUP_MESSAGE_HIGHLIGHT_CREATE',
+      chatId: 'chat-1',
+      messageId: 'msg-1',
+      text: '重点',
+      startOffset: 5,
+      endOffset: 7,
+    }) as { ok: boolean; store: OpenTeamStore }
+
+    expect(response.ok).toBe(true)
+    expect(response.store.messagesById['msg-1'].content).toBe('这里有一段重点内容')
+    expect(response.store.messageHighlightsById?.['msg-1']).toEqual([
+      expect.objectContaining({
+        messageId: 'msg-1',
+        text: '重点',
+        startOffset: 5,
+        endOffset: 7,
+      }),
+    ])
+  })
+
   it('includes persona from description for legacy roles without systemPrompt on the first user message', async () => {
     const store = makeStore()
     store.currentChatId = 'chat-1'
@@ -886,6 +942,9 @@ function makeStore(): OpenTeamStore {
     messagesById: {},
     roleTemplateOrder: [],
     roleTemplatesById: {},
+    globalNote: undefined,
+    chatNotesById: {},
+    messageHighlightsById: {},
     settings: { defaultMode: 'independent', maxContextChars: 6000, defaultChatSite: 'gemini' },
     viewState: { chatReadSeqById: {}, chatHasNewMessageById: {} },
   }

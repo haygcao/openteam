@@ -152,4 +152,178 @@ describe('team page messages view boundary', () => {
 
     expect(messagesEl.querySelector('.markdown-body strong')?.textContent).toBe('重点')
   })
+
+  it('renders saved message highlights without changing the message text', () => {
+    const now = Date.now()
+    const chat: GroupChat = {
+      id: 'chat-1',
+      name: '群聊',
+      mode: 'independent',
+      roleIds: ['role-1'],
+      messageIds: ['msg-1'],
+      nextMessageSeq: 2,
+      status: 'ready',
+      createdAt: now,
+      updatedAt: now,
+    }
+    const role: GroupRole = {
+      id: 'role-1',
+      chatId: chat.id,
+      name: '工程师',
+      status: 'ready',
+      contextCursor: 0,
+      createdAt: now,
+      updatedAt: now,
+    }
+    const message: GroupMessage = {
+      id: 'msg-1',
+      chatId: chat.id,
+      seq: 1,
+      type: 'assistant',
+      content: '这里有一段重点内容',
+      roleId: role.id,
+      roleName: role.name,
+      createdAt: now,
+      status: 'received',
+    }
+    const store: OpenTeamStore = {
+      ...createDefaultStore(),
+      currentChatId: chat.id,
+      chatOrder: [chat.id],
+      chatsById: { [chat.id]: chat },
+      rolesById: { [role.id]: role },
+      messagesById: { [message.id]: message },
+      messageHighlightsById: {
+        [message.id]: [
+          {
+            id: 'highlight-1',
+            messageId: message.id,
+            text: '重点',
+            startOffset: 5,
+            endOffset: 7,
+            createdAt: now,
+          },
+        ],
+      },
+    }
+    const messagesEl = document.createElement('section')
+
+    createMessagesView({
+      state: createTeamPageState(),
+      getStore: () => store,
+      messagesEl,
+      getCurrentChat: () => chat,
+      getCurrentRoles: () => [role],
+      getCurrentMessages: () => [message],
+      emptyCard: () => document.createElement('div'),
+      openAddPersonDialog: vi.fn(),
+      roleToneClass: () => 'role-tone-1',
+      roleAvatarLabel: () => '工',
+      messageTitle: message => message.roleName ?? 'AI 人员',
+      focusRoleFrame: vi.fn(),
+      insertMention: vi.fn(),
+      setReference: vi.fn(),
+      retryRoleReply: vi.fn(async () => undefined),
+      stopRoleReply: vi.fn(async () => undefined),
+      runCommand: vi.fn(async () => undefined),
+      render: vi.fn(),
+      showError: vi.fn(),
+      log: { warn: vi.fn() },
+    }).renderMessages()
+
+    expect(messagesEl.textContent).toContain(message.content)
+    expect(messagesEl.querySelector('.message-highlight')?.textContent).toBe('重点')
+  })
+
+  it('offers selected message text actions that can highlight and add to notes', async () => {
+    const now = Date.now()
+    const chat: GroupChat = {
+      id: 'chat-1',
+      name: '群聊',
+      mode: 'independent',
+      roleIds: ['role-1'],
+      messageIds: ['msg-1'],
+      nextMessageSeq: 2,
+      status: 'ready',
+      createdAt: now,
+      updatedAt: now,
+    }
+    const role: GroupRole = {
+      id: 'role-1',
+      chatId: chat.id,
+      name: '工程师',
+      status: 'ready',
+      contextCursor: 0,
+      createdAt: now,
+      updatedAt: now,
+    }
+    const message: GroupMessage = {
+      id: 'msg-1',
+      chatId: chat.id,
+      seq: 1,
+      type: 'assistant',
+      content: '这里有一段重点内容',
+      roleId: role.id,
+      roleName: role.name,
+      createdAt: now,
+      status: 'received',
+    }
+    const store: OpenTeamStore = {
+      ...createDefaultStore(),
+      currentChatId: chat.id,
+      chatOrder: [chat.id],
+      chatsById: { [chat.id]: chat },
+      rolesById: { [role.id]: role },
+      messagesById: { [message.id]: message },
+    }
+    const messagesEl = document.createElement('section')
+    document.body.append(messagesEl)
+    const runCommand = vi.fn(async () => undefined)
+    const insertTextIntoActiveNote = vi.fn()
+
+    createMessagesView({
+      state: createTeamPageState(),
+      getStore: () => store,
+      messagesEl,
+      getCurrentChat: () => chat,
+      getCurrentRoles: () => [role],
+      getCurrentMessages: () => [message],
+      emptyCard: () => document.createElement('div'),
+      openAddPersonDialog: vi.fn(),
+      roleToneClass: () => 'role-tone-1',
+      roleAvatarLabel: () => '工',
+      messageTitle: message => message.roleName ?? 'AI 人员',
+      focusRoleFrame: vi.fn(),
+      insertMention: vi.fn(),
+      setReference: vi.fn(),
+      insertTextIntoActiveNote,
+      retryRoleReply: vi.fn(async () => undefined),
+      stopRoleReply: vi.fn(async () => undefined),
+      runCommand,
+      render: vi.fn(),
+      showError: vi.fn(),
+      log: { warn: vi.fn() },
+    }).renderMessages()
+
+    const bodyText = messagesEl.querySelector('.message-body')?.firstChild?.firstChild
+    expect(bodyText?.textContent).toContain('重点')
+    const range = document.createRange()
+    range.setStart(bodyText as Text, 5)
+    range.setEnd(bodyText as Text, 7)
+    window.getSelection()?.removeAllRanges()
+    window.getSelection()?.addRange(range)
+
+    messagesEl.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }))
+    document.querySelector<HTMLButtonElement>('button[aria-label="高亮并加入笔记"]')?.click()
+    await Promise.resolve()
+
+    expect(insertTextIntoActiveNote).toHaveBeenCalledWith('重点')
+    expect(runCommand).toHaveBeenCalledWith('GROUP_MESSAGE_HIGHLIGHT_CREATE', {
+      chatId: chat.id,
+      messageId: message.id,
+      text: '重点',
+      startOffset: 5,
+      endOffset: 7,
+    })
+  })
 })

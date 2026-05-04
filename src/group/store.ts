@@ -1,10 +1,10 @@
-import type { GroupChat, GroupMessage, GroupRole, OpenTeamSettings, OpenTeamStore, OpenTeamViewState, RoleTemplate } from './types'
+import type { GroupChat, GroupMessage, GroupRole, MessageHighlight, OpenTeamSettings, OpenTeamStore, OpenTeamViewState, RichNoteDocument, RoleTemplate } from './types'
 
 export const STORE_KEY = 'openteam.groupStore'
 export const META_STORE_KEY = 'openteam.meta.v2'
 export const CHAT_KEY_PREFIX = 'openteam.chat.'
 export const MESSAGE_CHUNK_KEY_PREFIX = 'openteam.messages.'
-export const CURRENT_STORE_VERSION = 2
+export const CURRENT_STORE_VERSION = 3
 export const MESSAGE_CHUNK_SIZE = 100
 
 interface OpenTeamMetaStore {
@@ -13,6 +13,9 @@ interface OpenTeamMetaStore {
   chatOrder: string[]
   roleTemplateOrder: string[]
   roleTemplatesById: Record<string, RoleTemplate>
+  globalNote?: RichNoteDocument
+  chatNotesById?: Record<string, RichNoteDocument>
+  messageHighlightsById?: Record<string, MessageHighlight[]>
   settings: OpenTeamSettings
   viewState?: OpenTeamViewState
 }
@@ -51,6 +54,9 @@ export function createDefaultStore(): OpenTeamStore {
     messagesById: {},
     roleTemplateOrder: [],
     roleTemplatesById: {},
+    globalNote: undefined,
+    chatNotesById: {},
+    messageHighlightsById: {},
     settings: { ...DEFAULT_SETTINGS },
     viewState: {
       chatReadSeqById: {},
@@ -112,6 +118,9 @@ function normalizeStore(raw: unknown): OpenTeamStore {
     messagesById: readRecord(raw.messagesById),
     roleTemplateOrder: readStringArray(raw.roleTemplateOrder, defaults.roleTemplateOrder),
     roleTemplatesById: readRecord(raw.roleTemplatesById),
+    globalNote: normalizeNoteDocument(raw.globalNote),
+    chatNotesById: readNoteRecord(raw.chatNotesById),
+    messageHighlightsById: readHighlightsRecord(raw.messageHighlightsById),
     settings: normalizeSettings(raw.settings),
     viewState: normalizeViewState(raw.viewState),
   }
@@ -139,6 +148,9 @@ async function loadV2Store(rawMeta: unknown): Promise<OpenTeamStore> {
   store.chatOrder = chatDocuments.map(document => document.chat.id)
   store.roleTemplateOrder = [...meta.roleTemplateOrder]
   store.roleTemplatesById = { ...meta.roleTemplatesById }
+  store.globalNote = meta.globalNote
+  store.chatNotesById = { ...(meta.chatNotesById ?? {}) }
+  store.messageHighlightsById = { ...(meta.messageHighlightsById ?? {}) }
   store.settings = normalizeSettings(meta.settings)
   store.viewState = normalizeViewState(meta.viewState)
 
@@ -172,6 +184,9 @@ function buildStorageItems(store: OpenTeamStore): Record<string, unknown> {
     chatOrder: chatIds,
     roleTemplateOrder: [...store.roleTemplateOrder],
     roleTemplatesById: { ...store.roleTemplatesById },
+    globalNote: normalizeNoteDocument(store.globalNote),
+    chatNotesById: readNoteRecord(store.chatNotesById),
+    messageHighlightsById: readHighlightsRecord(store.messageHighlightsById),
     settings: normalizeSettings(store.settings),
     viewState: normalizeViewState(store.viewState),
   }
@@ -235,11 +250,13 @@ function normalizeMetaStore(raw: unknown): OpenTeamMetaStore {
     return {
       version: CURRENT_STORE_VERSION,
       chatOrder: [],
-      roleTemplateOrder: [],
-      roleTemplatesById: {},
-      settings: defaults.settings,
-      viewState: defaults.viewState,
-    }
+    roleTemplateOrder: [],
+    roleTemplatesById: {},
+    chatNotesById: {},
+    messageHighlightsById: {},
+    settings: defaults.settings,
+    viewState: defaults.viewState,
+  }
   }
 
   const meta: OpenTeamMetaStore = {
@@ -247,6 +264,9 @@ function normalizeMetaStore(raw: unknown): OpenTeamMetaStore {
     chatOrder: readStringArray(raw.chatOrder, []),
     roleTemplateOrder: readStringArray(raw.roleTemplateOrder, []),
     roleTemplatesById: readRecord(raw.roleTemplatesById),
+    globalNote: normalizeNoteDocument(raw.globalNote),
+    chatNotesById: readNoteRecord(raw.chatNotesById),
+    messageHighlightsById: readHighlightsRecord(raw.messageHighlightsById),
     settings: normalizeSettings(raw.settings),
     viewState: normalizeViewState(raw.viewState),
   }
@@ -384,6 +404,41 @@ function readNumberRecord(raw: unknown): Record<string, number> {
 function readBooleanRecord(raw: unknown): Record<string, boolean> {
   if (!isRecord(raw)) return {}
   return Object.fromEntries(Object.entries(raw).filter((entry): entry is [string, boolean] => typeof entry[1] === 'boolean'))
+}
+
+function readNoteRecord(raw: unknown): Record<string, RichNoteDocument> {
+  if (!isRecord(raw)) return {}
+  return Object.fromEntries(
+    Object.entries(raw)
+      .map(([key, value]) => [key, normalizeNoteDocument(value)] as const)
+      .filter((entry): entry is [string, RichNoteDocument] => Boolean(entry[1])),
+  )
+}
+
+function readHighlightsRecord(raw: unknown): Record<string, MessageHighlight[]> {
+  if (!isRecord(raw)) return {}
+  const result: Record<string, MessageHighlight[]> = {}
+  for (const [messageId, rawHighlights] of Object.entries(raw)) {
+    if (!Array.isArray(rawHighlights)) continue
+    const highlights = rawHighlights.filter((highlight): highlight is MessageHighlight => {
+      return (
+        isRecord(highlight) &&
+        typeof highlight.id === 'string' &&
+        typeof highlight.messageId === 'string' &&
+        typeof highlight.text === 'string' &&
+        typeof highlight.startOffset === 'number' &&
+        typeof highlight.endOffset === 'number' &&
+        typeof highlight.createdAt === 'number'
+      )
+    })
+    if (highlights.length > 0) result[messageId] = highlights
+  }
+  return result
+}
+
+function normalizeNoteDocument(raw: unknown): RichNoteDocument | undefined {
+  if (!isRecord(raw) || typeof raw.type !== 'string') return undefined
+  return raw as RichNoteDocument
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

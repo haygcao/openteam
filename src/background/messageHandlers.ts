@@ -16,6 +16,8 @@ const STALE_THINKING_MS = 120_000
 export const MESSAGE_ROUTE_TYPES = [
   'GROUP_ROLE_RETRY_REPLY',
   'GROUP_ROLE_STOP_REPLY',
+  'GROUP_NOTE_SAVE',
+  'GROUP_MESSAGE_HIGHLIGHT_CREATE',
   'GROUP_MESSAGE_SEND',
   'TEAM_FRAME_ROLE_READY',
   'TEAM_ROLE_CONVERSATION_UPDATED',
@@ -256,6 +258,56 @@ export function createMessageHandlers(deps: MessageHandlersDependencies): Backgr
     return { ok: true, store, messageId: active.messageId }
   }
 
+  const handleNoteSave = async (message: RuntimeMessage) => {
+    const scope = readOptionalString(message.scope)
+    if (scope !== 'global' && scope !== 'chat') throw new Error('未知笔记范围')
+    const content = requireNoteContent(message.content)
+
+    const { store } = await mutateStore(store => {
+      if (scope === 'global') {
+        store.globalNote = content
+        return
+      }
+
+      const chatId = requireString(message.chatId, '缺少群聊 ID')
+      requireChat(store, chatId)
+      store.chatNotesById ??= {}
+      store.chatNotesById[chatId] = content
+    })
+    await deps.broadcastStoreUpdated(store)
+    return { ok: true, store }
+  }
+
+  const handleMessageHighlightCreate = async (message: RuntimeMessage) => {
+    const chatId = requireString(message.chatId, '缺少群聊 ID')
+    const messageId = requireString(message.messageId, '缺少消息 ID')
+    const text = requireString(message.text, '高亮内容不能为空')
+    const startOffset = requireNumber(message.startOffset, '缺少高亮起点')
+    const endOffset = requireNumber(message.endOffset, '缺少高亮终点')
+    if (endOffset <= startOffset) throw new Error('高亮范围无效')
+    const timestamp = deps.now()
+
+    const { store } = await mutateStore(store => {
+      const chat = requireChat(store, chatId)
+      const target = store.messagesById[messageId]
+      if (!target || target.chatId !== chat.id) throw new Error('找不到消息')
+      if (startOffset < 0 || endOffset > target.content.length || target.content.slice(startOffset, endOffset) !== text) throw new Error('高亮范围与消息内容不匹配')
+
+      store.messageHighlightsById ??= {}
+      store.messageHighlightsById[messageId] ??= []
+      store.messageHighlightsById[messageId].push({
+        id: deps.newId('highlight'),
+        messageId,
+        text,
+        startOffset,
+        endOffset,
+        createdAt: timestamp,
+      })
+    })
+    await deps.broadcastStoreUpdated(store)
+    return { ok: true, store }
+  }
+
   const handleFrameRoleReady = async (message: RuntimeMessage, sender: chrome.runtime.MessageSender) => {
     const tabId = messageTabId(message, sender)
     if (tabId === undefined) throw new Error('缺少 sender tab')
@@ -461,6 +513,8 @@ export function createMessageHandlers(deps: MessageHandlersDependencies): Backgr
   return [
     { type: 'GROUP_ROLE_RETRY_REPLY', handler: handleRoleRetryReply },
     { type: 'GROUP_ROLE_STOP_REPLY', handler: handleRoleStopReply },
+    { type: 'GROUP_NOTE_SAVE', handler: handleNoteSave },
+    { type: 'GROUP_MESSAGE_HIGHLIGHT_CREATE', handler: handleMessageHighlightCreate },
     { type: 'GROUP_MESSAGE_SEND', handler: handleMessageSend },
     {
       type: 'TEAM_FRAME_ROLE_READY',
@@ -673,6 +727,16 @@ function requireString(value: unknown, error: string): string {
   const result = readOptionalString(value)
   if (!result) throw new Error(error)
   return result
+}
+
+function requireNumber(value: unknown, error: string): number {
+  if (typeof value !== 'number' || !Number.isFinite(value)) throw new Error(error)
+  return value
+}
+
+function requireNoteContent(value: unknown): NonNullable<OpenTeamStore['globalNote']> {
+  if (!isRecord(value) || typeof value.type !== 'string') throw new Error('笔记内容格式无效')
+  return value as NonNullable<OpenTeamStore['globalNote']>
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

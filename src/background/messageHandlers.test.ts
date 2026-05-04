@@ -72,6 +72,8 @@ describe('background message handlers', () => {
     expect(MESSAGE_ROUTE_TYPES).toEqual([
       'GROUP_ROLE_RETRY_REPLY',
       'GROUP_ROLE_STOP_REPLY',
+      'GROUP_NOTE_SAVE',
+      'GROUP_MESSAGE_HIGHLIGHT_CREATE',
       'GROUP_MESSAGE_SEND',
       'TEAM_FRAME_ROLE_READY',
       'TEAM_ROLE_CONVERSATION_UPDATED',

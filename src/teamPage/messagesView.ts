@@ -1,6 +1,6 @@
 import MarkdownIt from 'markdown-it'
 import { roleMentionLabel } from '../group/mentionParser'
-import type { GroupChat, GroupMessage, GroupRole, MessageReference, OpenTeamStore } from '../group/types'
+import type { GroupChat, GroupMessage, GroupRole, MessageHighlight, MessageReference, OpenTeamStore } from '../group/types'
 import type { TeamPageState } from './appState'
 import { buildChatRenderItems, getChatStartupNotice, getStoppedReplyRoles, getVisibleThinkingRoles, THINKING_TIMEOUT_MS } from './chatExperience'
 
@@ -25,6 +25,7 @@ export interface MessagesViewDependencies {
   focusRoleFrame(chatId: string, roleId: string | undefined): void
   insertMention(role: GroupRole): void
   setReference(message: GroupMessage): void
+  insertTextIntoActiveNote?(text: string): void
   retryRoleReply(role: GroupRole): Promise<void>
   stopRoleReply(role: GroupRole): Promise<void>
   runCommand(type: string, payload?: Record<string, unknown>): Promise<void>
@@ -40,6 +41,9 @@ export interface MessagesView {
 }
 
 export function createMessagesView(deps: MessagesViewDependencies): MessagesView {
+  let markMenu: HTMLElement | undefined
+  let selectedMark: { message: GroupMessage; text: string; startOffset: number; endOffset: number; rect: DOMRect } | undefined
+
   function renderMessages(): void {
     const chat = deps.getCurrentChat()
     const messages = deps.getCurrentMessages()
@@ -88,6 +92,7 @@ export function createMessagesView(deps: MessagesViewDependencies): MessagesView
 
     const article = document.createElement('article')
     article.className = `message-row message ${message.type}${showName ? '' : ' compact'}${showAvatar ? '' : ' no-avatar'}`
+    article.dataset.messageId = message.id
 
     if (message.type === 'system') {
       const pill = document.createElement('div')
@@ -136,6 +141,7 @@ export function createMessagesView(deps: MessagesViewDependencies): MessagesView
     } else {
       renderPlainMessageBody(body, message.content)
     }
+    renderSavedHighlights(body, message)
     bubble.append(body)
     if (message.references?.length) bubble.append(referenceBox(message.references[0]))
 
@@ -177,6 +183,12 @@ export function createMessagesView(deps: MessagesViewDependencies): MessagesView
 
   function renderPlainMessageBody(body: HTMLElement, content: string): void {
     body.append(document.createTextNode(content))
+  }
+
+  function renderSavedHighlights(body: HTMLElement, message: GroupMessage): void {
+    const highlights = deps.getStore().messageHighlightsById?.[message.id]
+    if (!highlights?.length) return
+    applyHighlightsToBody(body, highlights)
   }
 
   function shouldRenderMarkdownMessage(message: GroupMessage): boolean {
@@ -254,6 +266,7 @@ export function createMessagesView(deps: MessagesViewDependencies): MessagesView
       createdAt: message.createdAt,
       status: message.status,
       references: message.references,
+      highlights: deps.getStore().messageHighlightsById?.[message.id],
       targetRoleIds: message.targetRoleIds,
       mentionedRoleIds: message.mentionedRoleIds,
       showName,
@@ -399,6 +412,119 @@ export function createMessagesView(deps: MessagesViewDependencies): MessagesView
     })
   }
 
+  deps.messagesEl.addEventListener('mouseup', () => {
+    showMarkMenuFromSelection()
+  })
+
+  document.addEventListener('selectionchange', () => {
+    const selection = window.getSelection()
+    if (!selection || selection.isCollapsed) return
+    if (!deps.messagesEl.contains(selection.anchorNode)) hideMarkMenu()
+  })
+
+  document.addEventListener('click', event => {
+    if (markMenu?.contains(event.target as Node)) return
+    const target = event.target as Element | null
+    if (target?.closest('.message-body')) return
+    hideMarkMenu()
+  })
+
+  document.addEventListener('keydown', event => {
+    if (event.key === 'Escape') hideMarkMenu()
+  })
+
+  function showMarkMenuFromSelection(): void {
+    const selection = window.getSelection()
+    if (!selection || selection.isCollapsed || selection.rangeCount === 0) {
+      hideMarkMenu()
+      return
+    }
+
+    const range = selection.getRangeAt(0)
+    const body = closestMessageBody(range.commonAncestorContainer)
+    if (!body || !deps.messagesEl.contains(body)) {
+      hideMarkMenu()
+      return
+    }
+
+    const article = body.closest<HTMLElement>('.message-row[data-message-id]')
+    const messageId = article?.dataset.messageId
+    const message = messageId ? deps.getStore().messagesById[messageId] : undefined
+    const selectedText = selection.toString().trim()
+    if (!message || !selectedText) {
+      hideMarkMenu()
+      return
+    }
+
+    const startOffset = message.content.indexOf(selectedText)
+    if (startOffset < 0) {
+      hideMarkMenu()
+      return
+    }
+
+    selectedMark = {
+      message,
+      text: selectedText,
+      startOffset,
+      endOffset: startOffset + selectedText.length,
+      rect: rangeRect(range),
+    }
+    renderMarkMenu()
+  }
+
+  function renderMarkMenu(): void {
+    if (!selectedMark) return
+    markMenu?.remove()
+    markMenu = document.createElement('div')
+    markMenu.className = 'mark-menu'
+    markMenu.append(
+      markMenuButton('高亮', '高亮', () => applySelectedMark('highlight')),
+      markMenuButton('加入笔记', '加入笔记', () => applySelectedMark('note')),
+      markMenuButton('高亮并加入笔记', '高亮并加入笔记', () => applySelectedMark('both')),
+    )
+    document.body.append(markMenu)
+    const top = Math.max(8, selectedMark.rect.top - 42)
+    const left = Math.min(Math.max(8, selectedMark.rect.left), window.innerWidth - markMenu.offsetWidth - 8)
+    markMenu.style.top = `${top}px`
+    markMenu.style.left = `${left}px`
+  }
+
+  function markMenuButton(text: string, label: string, onClick: () => void): HTMLButtonElement {
+    const button = document.createElement('button')
+    button.type = 'button'
+    button.textContent = text
+    button.setAttribute('aria-label', label)
+    button.addEventListener('click', event => {
+      event.preventDefault()
+      event.stopPropagation()
+      onClick()
+    })
+    return button
+  }
+
+  function applySelectedMark(action: 'highlight' | 'note' | 'both'): void {
+    const mark = selectedMark
+    if (!mark) return
+    if (action === 'note' || action === 'both') deps.insertTextIntoActiveNote?.(mark.text)
+    if (action === 'highlight' || action === 'both') {
+      deps.runCommand('GROUP_MESSAGE_HIGHLIGHT_CREATE', {
+        chatId: mark.message.chatId,
+        messageId: mark.message.id,
+        text: mark.text,
+        startOffset: mark.startOffset,
+        endOffset: mark.endOffset,
+      }).catch(error => deps.showError(error instanceof Error ? error.message : String(error)))
+    }
+    window.getSelection()?.removeAllRanges()
+    hideMarkMenu()
+  }
+
+  function hideMarkMenu(): void {
+    selectedMark = undefined
+    markMenu?.remove()
+    markMenu = undefined
+  }
+
   function siteBadge(site: GroupRole['chatSite']): HTMLElement {
     const badge = document.createElement('span')
     badge.className = `role-site-badge site-pill-${site ?? 'gemini'}`
@@ -416,4 +542,61 @@ function siteLabel(site: GroupRole['chatSite']): string {
   if (site === 'kimi') return 'Kimi'
   if (site === 'qwen') return '千问'
   return 'Gemini'
+}
+
+function closestMessageBody(node: Node): HTMLElement | undefined {
+  const element = node.nodeType === Node.ELEMENT_NODE ? node as Element : node.parentElement
+  return element?.closest<HTMLElement>('.message-body') ?? undefined
+}
+
+function rangeRect(range: Range): DOMRect {
+  if (typeof range.getBoundingClientRect === 'function') return range.getBoundingClientRect()
+  return new DOMRect(8, 8, 1, 1)
+}
+
+function applyHighlightsToBody(body: HTMLElement, highlights: MessageHighlight[]): void {
+  const bodyText = body.textContent ?? ''
+  const normalized = highlights
+    .map(highlight => {
+      const renderedStart = bodyText.slice(highlight.startOffset, highlight.endOffset) === highlight.text ? highlight.startOffset : bodyText.indexOf(highlight.text)
+      return renderedStart >= 0 ? { ...highlight, startOffset: renderedStart, endOffset: renderedStart + highlight.text.length } : undefined
+    })
+    .filter((highlight): highlight is MessageHighlight => Boolean(highlight))
+    .sort((left, right) => left.startOffset - right.startOffset)
+
+  let cursor = 0
+  for (const highlight of normalized) {
+    if (highlight.startOffset < cursor) continue
+    wrapTextRange(body, highlight.startOffset, highlight.endOffset)
+    cursor = highlight.endOffset
+  }
+}
+
+function wrapTextRange(root: HTMLElement, startOffset: number, endOffset: number): void {
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT)
+  let textPosition = 0
+  const ranges: Array<{ node: Text; start: number; end: number }> = []
+
+  while (walker.nextNode()) {
+    const node = walker.currentNode as Text
+    const nodeStart = textPosition
+    const nodeEnd = nodeStart + node.data.length
+    if (nodeEnd > startOffset && nodeStart < endOffset) {
+      ranges.push({
+        node,
+        start: Math.max(0, startOffset - nodeStart),
+        end: Math.min(node.data.length, endOffset - nodeStart),
+      })
+    }
+    textPosition = nodeEnd
+  }
+
+  for (const range of ranges.reverse()) {
+    const selected = range.node.splitText(range.start)
+    selected.splitText(range.end - range.start)
+    const mark = document.createElement('span')
+    mark.className = 'message-highlight'
+    selected.parentNode?.insertBefore(mark, selected)
+    mark.append(selected)
+  }
 }

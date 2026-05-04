@@ -1,3 +1,5 @@
+import type { JSONContent } from '@tiptap/core'
+
 export type RoomMode = 'independent' | 'collaborative'
 export type ChatSite = 'gemini' | 'chatgpt' | 'claude' | 'deepseek' | 'kimi' | 'qwen'
 
@@ -16,6 +18,9 @@ export interface OpenTeamStore {
   messagesById: Record<string, GroupMessage>
   roleTemplateOrder: string[]
   roleTemplatesById: Record<string, RoleTemplate>
+  globalNote?: RichNoteDocument
+  chatNotesById?: Record<string, RichNoteDocument>
+  messageHighlightsById?: Record<string, MessageHighlight[]>
   settings: OpenTeamSettings
   viewState?: OpenTeamViewState
 }
@@ -98,6 +103,17 @@ export interface MessageReference {
   roleId?: string
   roleName?: string
   contentSnapshot: string
+}
+
+export type RichNoteDocument = JSONContent
+
+export interface MessageHighlight {
+  id: string
+  messageId: string
+  text: string
+  startOffset: number
+  endOffset: number
+  createdAt: number
 }
 
 export interface RuntimeFrameBinding {

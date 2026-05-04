@@ -35,6 +35,19 @@ export interface TeamPageDomRefs {
   personTemplateModalEl: HTMLElement
   addPersonModalEl: HTMLElement
   temporaryPersonModalEl: HTMLElement
+  notesPanelEl: HTMLElement
+  toggleNotesPanelEl: HTMLButtonElement
+  closeNotesPanelEl: HTMLButtonElement
+  globalNoteTabEl: HTMLButtonElement
+  chatNoteTabEl: HTMLButtonElement
+  notesEditorEl: HTMLElement
+  noteBoldEl: HTMLButtonElement
+  noteItalicEl: HTMLButtonElement
+  noteStrikeEl: HTMLButtonElement
+  noteBulletListEl: HTMLButtonElement
+  noteOrderedListEl: HTMLButtonElement
+  noteUndoEl: HTMLButtonElement
+  noteRedoEl: HTMLButtonElement
   peopleLibrarySummaryEl: HTMLElement
   peopleLibraryListEl: HTMLElement
   peopleLibraryPaginationEl: HTMLElement
@@ -109,6 +122,19 @@ export function createTeamPageDomRefs(): TeamPageDomRefs {
     personTemplateModalEl: requireElement<HTMLElement>('#person-template-modal'),
     addPersonModalEl: requireElement<HTMLElement>('#add-person-modal'),
     temporaryPersonModalEl: requireElement<HTMLElement>('#temporary-person-modal'),
+    notesPanelEl: requireElement<HTMLElement>('#notes-panel'),
+    toggleNotesPanelEl: requireElement<HTMLButtonElement>('#toggle-notes-panel'),
+    closeNotesPanelEl: requireElement<HTMLButtonElement>('#close-notes-panel'),
+    globalNoteTabEl: requireElement<HTMLButtonElement>('#global-note-tab'),
+    chatNoteTabEl: requireElement<HTMLButtonElement>('#chat-note-tab'),
+    notesEditorEl: requireElement<HTMLElement>('#notes-editor'),
+    noteBoldEl: requireElement<HTMLButtonElement>('#note-bold'),
+    noteItalicEl: requireElement<HTMLButtonElement>('#note-italic'),
+    noteStrikeEl: requireElement<HTMLButtonElement>('#note-strike'),
+    noteBulletListEl: requireElement<HTMLButtonElement>('#note-bullet-list'),
+    noteOrderedListEl: requireElement<HTMLButtonElement>('#note-ordered-list'),
+    noteUndoEl: requireElement<HTMLButtonElement>('#note-undo'),
+    noteRedoEl: requireElement<HTMLButtonElement>('#note-redo'),
     peopleLibrarySummaryEl: requireElement<HTMLElement>('#people-library-summary'),
     peopleLibraryListEl: requireElement<HTMLElement>('#people-library-list'),
     peopleLibraryPaginationEl: requireElement<HTMLElement>('#people-library-pagination'),

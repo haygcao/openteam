@@ -55,6 +55,9 @@ describe('group store', () => {
       messagesById: {},
       roleTemplateOrder: [],
       roleTemplatesById: {},
+      globalNote: undefined,
+      chatNotesById: {},
+      messageHighlightsById: {},
       settings: {
         defaultMode: 'independent',
         maxContextChars: 6000,
@@ -226,6 +229,35 @@ describe('group store', () => {
           messageIds: messages.map(message => message.id),
         },
       },
+    })
+  })
+
+  it('persists global notes, chat notes, and message highlights in split storage metadata', async () => {
+    const store = createDefaultStore()
+    store.globalNote = { type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text: '全局想法' }] }] }
+    store.chatNotesById!['chat-1'] = { type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text: '群聊笔记' }] }] }
+    store.messageHighlightsById!['msg-1'] = [
+      {
+        id: 'highlight-1',
+        messageId: 'msg-1',
+        text: '重点内容',
+        startOffset: 2,
+        endOffset: 6,
+        createdAt: 3,
+      },
+    ]
+
+    await saveStore(store)
+
+    expect(stored[META_STORE_KEY]).toMatchObject({
+      globalNote: store.globalNote,
+      chatNotesById: store.chatNotesById,
+      messageHighlightsById: store.messageHighlightsById,
+    })
+    await expect(loadStore()).resolves.toMatchObject({
+      globalNote: store.globalNote,
+      chatNotesById: store.chatNotesById,
+      messageHighlightsById: store.messageHighlightsById,
     })
   })
 
