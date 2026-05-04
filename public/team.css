@@ -287,6 +287,10 @@ button {
   font-size: 22px;
 }
 
+#open-all-notes {
+  font-size: 18px;
+}
+
 .sidebar {
   position: relative;
   display: grid;
@@ -1627,6 +1631,87 @@ select:focus {
 
 .notes-editor .ProseMirror ul,
 .notes-editor .ProseMirror ol {
+  padding-left: 22px;
+}
+
+.all-notes-modal {
+  width: min(760px, calc(100vw - 48px));
+  max-height: min(760px, calc(100vh - 48px));
+  overflow: hidden;
+}
+
+.all-notes-list {
+  display: grid;
+  max-height: calc(100vh - 180px);
+  gap: 12px;
+  overflow: auto;
+  padding: 18px;
+}
+
+.all-notes-empty {
+  border: 1px dashed rgba(132, 153, 171, 0.24);
+  border-radius: 10px;
+  padding: 28px;
+  color: var(--muted);
+  text-align: center;
+}
+
+.all-note-item {
+  border: 1px solid rgba(132, 153, 171, 0.16);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.045);
+  overflow: hidden;
+}
+
+.all-note-item.deleted-chat {
+  border-color: rgba(248, 184, 78, 0.22);
+  background: rgba(248, 184, 78, 0.055);
+}
+
+.all-note-item-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 13px 15px 10px;
+  border-bottom: 1px solid rgba(128, 151, 171, 0.08);
+}
+
+.all-note-item-header h3 {
+  margin: 0;
+  color: #eff9fa;
+  font-size: 15px;
+}
+
+.all-note-meta {
+  flex: 0 0 auto;
+  border: 1px solid rgba(132, 153, 171, 0.16);
+  border-radius: 999px;
+  padding: 4px 8px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 760;
+}
+
+.all-note-body {
+  padding: 14px 16px 16px;
+  color: #dce9ee;
+  font-size: 13px;
+  line-height: 1.65;
+}
+
+.all-note-body p,
+.all-note-body ul,
+.all-note-body ol {
+  margin: 0 0 10px;
+}
+
+.all-note-body > :last-child {
+  margin-bottom: 0;
+}
+
+.all-note-body ul,
+.all-note-body ol {
   padding-left: 22px;
 }
 

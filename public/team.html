@@ -17,8 +17,7 @@
         <div></div>
         <div class="rail-actions">
           <button class="rail-btn active" type="button" aria-label="群聊">⌁</button>
-          <button class="rail-btn" type="button" aria-label="消息">◌</button>
-          <button class="rail-btn" type="button" aria-label="实验">⌬</button>
+          <button id="open-all-notes" class="rail-btn" type="button" aria-label="查看全部笔记" title="查看全部笔记">✎</button>
         </div>
         <div class="rail-bottom">
           <button id="settings-button" class="rail-btn" type="button" aria-label="设置" aria-expanded="false" aria-controls="settings-menu">⚙</button>
@@ -165,6 +164,19 @@
     <span id="template-summary" hidden></span>
     <div id="template-list" hidden></div>
     <button id="window-launcher" class="launcher" type="button" aria-label="打开 OpenTeam" hidden>⌁</button>
+
+    <div id="all-notes-modal" class="modal-backdrop" hidden>
+      <section class="modal all-notes-modal" role="dialog" aria-modal="true" aria-labelledby="all-notes-title">
+        <div class="modal-header">
+          <div>
+            <h2 id="all-notes-title">全部笔记</h2>
+            <p class="tiny">查看全局笔记和所有群聊笔记，已删除群聊的笔记也会保留。</p>
+          </div>
+          <button id="close-all-notes" class="icon-btn" type="button" aria-label="关闭全部笔记">×</button>
+        </div>
+        <div id="all-notes-list" class="all-notes-list"></div>
+      </section>
+    </div>
 
     <div id="people-library-modal" class="modal-backdrop" hidden>
       <section class="modal" role="dialog" aria-modal="true" aria-labelledby="people-library-title">

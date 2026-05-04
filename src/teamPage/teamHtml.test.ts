@@ -69,6 +69,9 @@ describe('team.html chat creation UI', () => {
     expect(html).toContain('id="window-launcher"')
     expect(html).toContain('id="iframe-host"')
     expect(html).toContain('id="toggle-notes-panel"')
+    expect(html).toContain('id="open-all-notes"')
+    expect(html).toContain('id="all-notes-modal"')
+    expect(html).toContain('id="all-notes-list"')
     expect(html).toContain('id="notes-panel"')
     expect(html).toContain('id="notes-drag-handle"')
     expect(html).toContain('id="notes-editor"')
@@ -93,6 +96,17 @@ describe('team.html chat creation UI', () => {
     expect(notesPanelRule).not.toContain('translateX(100%)')
     expect(notesOpenRule).toContain('pointer-events: auto;')
     expect(html).toMatch(/\.notes-panel-header\s*{[^}]*cursor:\s*grab;/s)
+  })
+
+  it('uses the left rail note icon for all notes instead of inactive placeholder icons', () => {
+    const html = readTeamDocument()
+
+    expect(html).toContain('aria-label="查看全部笔记"')
+    expect(html).toContain('id="open-all-notes"')
+    expect(html).not.toContain('aria-label="消息"')
+    expect(html).not.toContain('aria-label="实验"')
+    expect(html).toMatch(/\.all-notes-modal\s*{[^}]*width:\s*min\(760px,\s*calc\(100vw - 48px\)\);/s)
+    expect(html).toMatch(/\.all-note-item\.deleted-chat\s*{[^}]*border-color:\s*rgba\(248,\s*184,\s*78,\s*0\.22\);/s)
   })
 
   it('styles window controls as visible mac-style traffic lights', () => {

@@ -614,6 +614,7 @@ describe('background group chat experience handlers', () => {
     store.chatsById['chat-1'] = { ...makeChat('chat-1', ['role-1']), messageIds: ['msg-1'], nextMessageSeq: 2 }
     store.chatsById['chat-2'] = makeChat('chat-2')
     store.chatOrder = ['chat-1', 'chat-2']
+    store.chatNotesById = { 'chat-1': { type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text: '保留的笔记' }] }] } }
     store.rolesById['role-1'] = makeRole('chat-1', 'role-1', '程序员')
     store.messagesById['msg-1'] = {
       id: 'msg-1',
@@ -643,6 +644,7 @@ describe('background group chat experience handlers', () => {
     expect(deleted.store.currentChatId).toBe('chat-2')
     expect(deleted.store.viewState?.chatReadSeqById?.['chat-1']).toBeUndefined()
     expect(deleted.store.viewState?.chatHasNewMessageById?.['chat-1']).toBeUndefined()
+    expect(deleted.store.chatNotesById?.['chat-1']).toEqual({ type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text: '保留的笔记' }] }] })
     const snapshot = await harness.invoke({ type: 'GROUP_STORE_GET' }) as { bindings: unknown[] }
     expect(snapshot.bindings).toEqual([])
   })

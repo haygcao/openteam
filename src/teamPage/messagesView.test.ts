@@ -2,12 +2,22 @@
 
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { GroupChat, GroupMessage, GroupRole, OpenTeamStore } from '../group/types'
 import { createDefaultStore } from '../group/store'
 import { createTeamPageState } from './appState'
 import { THINKING_TIMEOUT_MS } from './chatExperience'
 import { createMessagesView } from './messagesView'
+
+afterEach(() => {
+  window.getSelection()?.removeAllRanges()
+  document.body.replaceChildren()
+  vi.useRealTimers()
+})
+
+function settleMarkMenuTimer(): void {
+  vi.advanceTimersByTime(90)
+}
 
 describe('team page messages view boundary', () => {
   it('keeps message rendering and message actions outside the team page entrypoint', () => {
@@ -805,8 +815,9 @@ describe('team page messages view boundary', () => {
     window.getSelection()?.removeAllRanges()
     window.getSelection()?.addRange(range)
 
+    vi.useFakeTimers()
     messagesEl.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }))
-    await new Promise(resolve => setTimeout(resolve, 90))
+    settleMarkMenuTimer()
     document.querySelector<HTMLButtonElement>('button[aria-label="高亮并加入笔记"]')?.click()
     await Promise.resolve()
 
@@ -886,8 +897,9 @@ describe('team page messages view boundary', () => {
     window.getSelection()?.removeAllRanges()
     window.getSelection()?.addRange(range)
 
+    vi.useFakeTimers()
     document.dispatchEvent(new Event('selectionchange'))
-    await new Promise(resolve => setTimeout(resolve, 90))
+    settleMarkMenuTimer()
     document.querySelector<HTMLButtonElement>('button[aria-label="高亮颜色：蓝色"]')?.click()
     document.querySelector<HTMLButtonElement>('button[aria-label="高亮"]')?.click()
     await Promise.resolve()
@@ -966,12 +978,13 @@ describe('team page messages view boundary', () => {
     window.getSelection()?.removeAllRanges()
     window.getSelection()?.addRange(range)
 
+    vi.useFakeTimers()
     messagesEl.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }))
     document.dispatchEvent(new Event('selectionchange'))
     expect(document.querySelector('.mark-menu')).toBeNull()
 
     messagesEl.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }))
-    await new Promise(resolve => setTimeout(resolve, 90))
+    settleMarkMenuTimer()
     expect(document.querySelector('.mark-menu')).not.toBeNull()
   })
 
@@ -1040,11 +1053,12 @@ describe('team page messages view boundary', () => {
     window.getSelection()?.removeAllRanges()
     window.getSelection()?.addRange(range)
 
+    vi.useFakeTimers()
     messagesEl.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }))
     document.dispatchEvent(new Event('selectionchange'))
     document.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }))
     outsideEl.dispatchEvent(new MouseEvent('click', { bubbles: true }))
-    await new Promise(resolve => setTimeout(resolve, 90))
+    settleMarkMenuTimer()
 
     expect(document.querySelector('.mark-menu')).not.toBeNull()
   })
@@ -1127,8 +1141,9 @@ describe('team page messages view boundary', () => {
     window.getSelection()?.removeAllRanges()
     window.getSelection()?.addRange(range)
 
+    vi.useFakeTimers()
     document.dispatchEvent(new Event('selectionchange'))
-    await new Promise(resolve => setTimeout(resolve, 90))
+    settleMarkMenuTimer()
 
     expect(document.querySelector<HTMLElement>('.mark-menu')?.style.top).toBe('20px')
   })

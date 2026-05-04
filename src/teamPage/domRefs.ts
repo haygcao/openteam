@@ -29,6 +29,10 @@ export interface TeamPageDomRefs {
   templateFormTitleEl: HTMLElement
   settingsButtonEl: HTMLButtonElement
   settingsMenuEl: HTMLElement
+  openAllNotesEl: HTMLButtonElement
+  closeAllNotesEl: HTMLButtonElement
+  allNotesModalEl: HTMLElement
+  allNotesListEl: HTMLElement
   openPeopleLibraryEl: HTMLButtonElement
   closePeopleLibraryEl: HTMLButtonElement
   peopleLibraryModalEl: HTMLElement
@@ -117,6 +121,10 @@ export function createTeamPageDomRefs(): TeamPageDomRefs {
     templateFormTitleEl: requireElement<HTMLElement>('#template-form-title'),
     settingsButtonEl: requireElement<HTMLButtonElement>('#settings-button'),
     settingsMenuEl: requireElement<HTMLElement>('#settings-menu'),
+    openAllNotesEl: requireElement<HTMLButtonElement>('#open-all-notes'),
+    closeAllNotesEl: requireElement<HTMLButtonElement>('#close-all-notes'),
+    allNotesModalEl: requireElement<HTMLElement>('#all-notes-modal'),
+    allNotesListEl: requireElement<HTMLElement>('#all-notes-list'),
     openPeopleLibraryEl: requireElement<HTMLButtonElement>('#open-people-library'),
     closePeopleLibraryEl: requireElement<HTMLButtonElement>('#close-people-library'),
     peopleLibraryModalEl: requireElement<HTMLElement>('#people-library-modal'),

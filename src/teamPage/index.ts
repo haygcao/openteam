@@ -1,6 +1,7 @@
 import type { GroupChat, GroupMessage, GroupRole, OpenTeamStore, RoleTemplate } from '../group/types'
 import { createDefaultStore } from '../group/store'
 import { createTeamPageState } from './appState'
+import { createAllNotesView } from './allNotesView'
 import { createChatHeaderView } from './chatHeaderView'
 import { createChatListView } from './chatListView'
 import { createComposerView } from './composerView'
@@ -27,6 +28,7 @@ const { appShellEl, toggleWindowSizeEl, toggleFullscreenEl, storeSummaryEl, chat
 const { roleSummaryEl, roleListEl, roleTemplateSelectEl, templateListEl, targetPreviewEl, busyPreviewEl, composerFormEl, sendButtonEl } = teamDomRefs
 const { messageInputEl, referenceDraftEl, mentionPanelEl, errorEl, newChatNameEl, createChatFormEl, quickCreateChatEl } = teamDomRefs
 const { templateNameEl, templateDescriptionEl, templatePromptEl, templateFormTitleEl, settingsButtonEl, settingsMenuEl } = teamDomRefs
+const { openAllNotesEl, closeAllNotesEl, allNotesModalEl, allNotesListEl } = teamDomRefs
 const { openPeopleLibraryEl, closePeopleLibraryEl, peopleLibraryModalEl, personTemplateModalEl, addPersonModalEl, temporaryPersonModalEl } = teamDomRefs
 const { notesPanelEl, notesDragHandleEl, toggleNotesPanelEl, closeNotesPanelEl, globalNoteTabEl, chatNoteTabEl, notesEditorEl } = teamDomRefs
 const { noteBoldEl, noteItalicEl, noteStrikeEl, noteBulletListEl, noteOrderedListEl, noteUndoEl, noteRedoEl } = teamDomRefs
@@ -70,6 +72,15 @@ const floatingWindowControls = createFloatingWindowControls({
 })
 const setWindowMinimized = floatingWindowControls.setWindowMinimized
 const registerFloatingWindowControls = floatingWindowControls.registerFloatingWindowControls
+const allNotesView = createAllNotesView({
+  openAllNotesEl,
+  closeAllNotesEl,
+  allNotesModalEl,
+  allNotesListEl,
+  getStore: () => store,
+})
+const renderAllNotes = allNotesView.renderAllNotes
+const registerAllNotesEvents = allNotesView.registerAllNotesEvents
 const rolePanelView = createRolePanelView({
   state: appState,
   getStore: () => store,
@@ -387,6 +398,7 @@ function render(): void {
   renderSelectedChat()
   renderTemplates()
   renderAddPersonDialog()
+  if (!allNotesModalEl.hidden) renderAllNotes()
 }
 
 function renderSelectedChat(): void {
@@ -421,6 +433,7 @@ async function boot(): Promise<void> {
   window.addEventListener('pagehide', () => primaryCoordinator.dispose(), { once: true })
   registerRuntimePush()
   registerFloatingWindowControls()
+  registerAllNotesEvents()
   registerUi()
   registerNotesEvents()
   render()
