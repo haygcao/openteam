@@ -28,6 +28,9 @@ export interface TeamPageState {
   notesPanelOpen: boolean
   activeNoteScope: 'global' | 'chat'
   peopleLibraryPage: number
+  peopleLibraryTemplateType: 'builtin' | 'custom'
+  peopleLibrarySearchQuery: string
+  previewTemplateId?: string
   addPersonTemplateType: 'builtin' | 'custom'
   addPersonSearchQuery: string
   pendingSwitchAnimationFrame?: number
@@ -55,6 +58,8 @@ export function createTeamPageState(): TeamPageState {
     temporaryPersonDrafts: [],
     addPersonSiteByKey: new Map<string, Set<ChatSite>>(),
     peopleLibraryPage: 0,
+    peopleLibraryTemplateType: 'builtin',
+    peopleLibrarySearchQuery: '',
     addPersonTemplateType: 'builtin',
     addPersonSearchQuery: '',
     notesPanelOpen: false,

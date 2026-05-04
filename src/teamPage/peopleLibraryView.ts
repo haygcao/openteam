@@ -23,10 +23,18 @@ export interface PeopleLibraryViewDependencies {
   peopleLibrarySummaryEl: HTMLElement
   peopleLibraryListEl: HTMLElement
   peopleLibraryPaginationEl: HTMLElement
+  peopleLibrarySearchEl: HTMLInputElement
+  peopleLibraryBuiltinTabEl: HTMLButtonElement
+  peopleLibraryCustomTabEl: HTMLButtonElement
   addLibraryPeopleListEl: HTMLElement
   addPersonSearchEl: HTMLInputElement
   addPersonBuiltinTabEl: HTMLButtonElement
   addPersonCustomTabEl: HTMLButtonElement
+  builtinTemplateDetailModalEl: HTMLElement
+  builtinTemplateDetailTitleEl: HTMLElement
+  builtinTemplateDetailMetaEl: HTMLElement
+  builtinTemplateDetailPromptEl: HTMLElement
+  closeBuiltinTemplateDetailEl: HTMLButtonElement
   roleTemplateSelectEl: HTMLSelectElement
   templateListEl: HTMLElement
   templateNameEl: HTMLInputElement
@@ -73,16 +81,22 @@ export interface PeopleLibraryView {
 
 export function createPeopleLibraryView(deps: PeopleLibraryViewDependencies): PeopleLibraryView {
   function renderTemplates(): void {
-    const templates = deps.getTemplates()
+    const allTemplates = deps.getTemplates()
+    ensurePeopleLibraryTemplateTypeHasItems()
+    syncPeopleLibraryTypeTabs()
+    const templates = filteredPeopleLibraryTemplates()
     deps.peopleLibrarySummaryEl.textContent = `${templates.length} 人`
     deps.roleTemplateSelectEl.replaceChildren(new Option('不使用人员库，手动创建', ''))
-    for (const template of templates) deps.roleTemplateSelectEl.append(new Option(template.name, template.id))
+    for (const template of allTemplates) deps.roleTemplateSelectEl.append(new Option(template.name, template.id))
 
     deps.templateListEl.replaceChildren()
     deps.peopleLibraryListEl.replaceChildren()
     deps.peopleLibraryPaginationEl.replaceChildren()
     if (templates.length === 0) {
-      deps.peopleLibraryListEl.append(deps.emptyCard('暂无人员', '新建人员后，可在添加人员时复用。'))
+      deps.peopleLibraryListEl.append(deps.emptyCard(
+        deps.state.peopleLibrarySearchQuery.trim() ? `没有匹配的${deps.state.peopleLibraryTemplateType === 'builtin' ? '内置' : '自定义'}人员` : `暂无${deps.state.peopleLibraryTemplateType === 'builtin' ? '内置' : '自定义'}人员`,
+        deps.state.peopleLibraryTemplateType === 'builtin' ? '可以切换到自定义人员，或调整搜索词。' : '点击右上角新建人员，保存后会出现在这里。',
+      ))
     } else {
       const visibleTemplates = pagedTemplates(templates)
       for (const template of visibleTemplates) {
@@ -168,8 +182,12 @@ export function createPeopleLibraryView(deps: PeopleLibraryViewDependencies): Pe
     deps.personTemplateModalEl.hidden = true
     deps.addPersonModalEl.hidden = true
     deps.temporaryPersonModalEl.hidden = true
+    deps.builtinTemplateDetailModalEl.hidden = true
     deps.state.selectedTemplateId = undefined
+    deps.state.previewTemplateId = undefined
     deps.state.addPersonSiteMenuId = undefined
+    deps.state.peopleLibraryTemplateType = 'builtin'
+    deps.state.peopleLibrarySearchQuery = ''
     deps.state.addPersonTemplateType = 'builtin'
     deps.state.addPersonSearchQuery = ''
   }
@@ -180,6 +198,9 @@ export function createPeopleLibraryView(deps: PeopleLibraryViewDependencies): Pe
       deps.settingsButtonEl.setAttribute('aria-expanded', 'false')
       deps.peopleLibraryModalEl.hidden = false
       deps.state.peopleLibraryPage = 0
+      deps.state.peopleLibraryTemplateType = 'builtin'
+      deps.state.peopleLibrarySearchQuery = ''
+      deps.peopleLibrarySearchEl.value = ''
       deps.log.info('ui:people-library:open', { templateCount: deps.getTemplates().length })
       renderTemplates()
     })
@@ -190,9 +211,26 @@ export function createPeopleLibraryView(deps: PeopleLibraryViewDependencies): Pe
 
     deps.newTemplateEl.addEventListener('click', () => openTemplateEditor())
     deps.closePersonTemplateEl.addEventListener('click', closeTemplateEditor)
+    deps.closeBuiltinTemplateDetailEl.addEventListener('click', closeBuiltinTemplateDetail)
     for (const input of templateSiteInputs()) {
       input.addEventListener('change', syncTemplateChatGptGptsField)
     }
+
+    deps.peopleLibrarySearchEl.addEventListener('input', () => {
+      deps.state.peopleLibrarySearchQuery = deps.peopleLibrarySearchEl.value
+      deps.state.peopleLibraryPage = 0
+      renderTemplates()
+    })
+    deps.peopleLibraryBuiltinTabEl.addEventListener('click', () => {
+      deps.state.peopleLibraryTemplateType = 'builtin'
+      deps.state.peopleLibraryPage = 0
+      renderTemplates()
+    })
+    deps.peopleLibraryCustomTabEl.addEventListener('click', () => {
+      deps.state.peopleLibraryTemplateType = 'custom'
+      deps.state.peopleLibraryPage = 0
+      renderTemplates()
+    })
 
     deps.closeAddPersonEl.addEventListener('click', () => {
       deps.addPersonModalEl.hidden = true
@@ -305,7 +343,17 @@ export function createPeopleLibraryView(deps: PeopleLibraryViewDependencies): Pe
 
     const actions = document.createElement('div')
     actions.className = 'template-card-actions'
-    if (template.type !== 'builtin') {
+    if (template.type === 'builtin') {
+      const detail = document.createElement('button')
+      detail.type = 'button'
+      detail.className = 'btn btn-ghost template-detail'
+      detail.textContent = '详情'
+      detail.addEventListener('click', event => {
+        event.stopPropagation()
+        openBuiltinTemplateDetail(template)
+      })
+      actions.append(detail)
+    } else {
       actions.append(edit)
     }
 
@@ -394,6 +442,49 @@ export function createPeopleLibraryView(deps: PeopleLibraryViewDependencies): Pe
       label.append(checkbox, content, addPersonSiteControl(item.key, item.chatSites, item.disabledSites))
       deps.addLibraryPeopleListEl.append(label)
     }
+  }
+
+  function filteredPeopleLibraryTemplates(): RoleTemplate[] {
+    return deps.getTemplates().filter(template => template.type === deps.state.peopleLibraryTemplateType && matchesTemplateSearch(template, deps.state.peopleLibrarySearchQuery))
+  }
+
+  function ensurePeopleLibraryTemplateTypeHasItems(): void {
+    if (deps.state.peopleLibrarySearchQuery.trim()) return
+    const templates = deps.getTemplates()
+    if (templates.some(template => template.type === deps.state.peopleLibraryTemplateType)) return
+    const fallbackType = deps.state.peopleLibraryTemplateType === 'builtin' ? 'custom' : 'builtin'
+    if (templates.some(template => template.type === fallbackType)) deps.state.peopleLibraryTemplateType = fallbackType
+  }
+
+  function matchesTemplateSearch(template: RoleTemplate, queryValue: string): boolean {
+    const query = queryValue.trim().toLowerCase()
+    if (!query) return true
+    return [
+      template.name,
+      template.description ?? '',
+      template.systemPrompt,
+    ].some(value => value.toLowerCase().includes(query))
+  }
+
+  function syncPeopleLibraryTypeTabs(): void {
+    const builtinActive = deps.state.peopleLibraryTemplateType === 'builtin'
+    deps.peopleLibraryBuiltinTabEl.className = `template-type-tab${builtinActive ? ' active' : ''}`
+    deps.peopleLibraryCustomTabEl.className = `template-type-tab${builtinActive ? '' : ' active'}`
+    deps.peopleLibraryBuiltinTabEl.setAttribute('aria-selected', String(builtinActive))
+    deps.peopleLibraryCustomTabEl.setAttribute('aria-selected', String(!builtinActive))
+  }
+
+  function openBuiltinTemplateDetail(template: RoleTemplate): void {
+    deps.state.previewTemplateId = template.id
+    deps.builtinTemplateDetailTitleEl.textContent = template.name
+    deps.builtinTemplateDetailMetaEl.textContent = `${templateTypeLabel(template.type)} · 默认站点：${siteLabel(visibleChatSite(template.defaultChatSite ?? deps.getStore().settings.defaultChatSite))}`
+    deps.builtinTemplateDetailPromptEl.textContent = template.systemPrompt || '未填写提示词'
+    deps.builtinTemplateDetailModalEl.hidden = false
+  }
+
+  function closeBuiltinTemplateDetail(): void {
+    deps.builtinTemplateDetailModalEl.hidden = true
+    deps.state.previewTemplateId = undefined
   }
 
   function addPersonItems(): AddPersonItem[] {

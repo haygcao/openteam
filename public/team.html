@@ -217,6 +217,13 @@
               <h3>人员列表</h3>
               <span id="people-library-summary" class="tiny">0 人</span>
             </div>
+            <div class="people-library-toolbar">
+              <input id="people-library-search" type="search" placeholder="搜索人员名称、描述或提示词" autocomplete="off" />
+              <div class="template-type-tabs" role="tablist" aria-label="人员库类型">
+                <button id="people-library-tab-builtin" class="template-type-tab active" type="button" data-template-type="builtin">内置人员</button>
+                <button id="people-library-tab-custom" class="template-type-tab" type="button" data-template-type="custom">自定义人员</button>
+              </div>
+            </div>
             <div id="people-library-list" class="template-list"></div>
             <div id="people-library-pagination" class="pagination-bar"></div>
           </div>
@@ -284,6 +291,19 @@
             <button class="btn btn-primary" type="submit">保存人员</button>
           </div>
         </form>
+      </section>
+    </div>
+
+    <div id="builtin-template-detail-modal" class="modal-backdrop" hidden>
+      <section class="modal template-detail-modal" role="dialog" aria-modal="true" aria-labelledby="builtin-template-detail-title">
+        <div class="modal-header">
+          <div>
+            <h2 id="builtin-template-detail-title">内置人员</h2>
+            <p id="builtin-template-detail-meta" class="tiny">系统内置人员</p>
+          </div>
+          <button id="close-builtin-template-detail" class="icon-btn" type="button" aria-label="关闭内置人员详情">×</button>
+        </div>
+        <pre id="builtin-template-detail-prompt" class="template-prompt-preview"></pre>
       </section>
     </div>
 

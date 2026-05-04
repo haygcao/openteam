@@ -34,7 +34,8 @@ const { allNoteBoldEl, allNoteItalicEl, allNoteStrikeEl, allNoteBulletListEl, al
 const { openPeopleLibraryEl, closePeopleLibraryEl, peopleLibraryModalEl, personTemplateModalEl, addPersonModalEl, temporaryPersonModalEl } = teamDomRefs
 const { notesPanelEl, notesDragHandleEl, toggleNotesPanelEl, closeNotesPanelEl, globalNoteTabEl, chatNoteTabEl, notesEditorEl } = teamDomRefs
 const { noteBoldEl, noteItalicEl, noteStrikeEl, noteBulletListEl, noteOrderedListEl, noteUndoEl, noteRedoEl } = teamDomRefs
-const { peopleLibrarySummaryEl, peopleLibraryListEl, peopleLibraryPaginationEl, addLibraryPeopleListEl, addPersonSearchEl, addPersonBuiltinTabEl, addPersonCustomTabEl, newTemplateEl, closePersonTemplateEl, closeAddPersonEl } = teamDomRefs
+const { peopleLibrarySummaryEl, peopleLibraryListEl, peopleLibraryPaginationEl, peopleLibrarySearchEl, peopleLibraryBuiltinTabEl, peopleLibraryCustomTabEl, addLibraryPeopleListEl, addPersonSearchEl, addPersonBuiltinTabEl, addPersonCustomTabEl } = teamDomRefs
+const { builtinTemplateDetailModalEl, builtinTemplateDetailTitleEl, builtinTemplateDetailMetaEl, builtinTemplateDetailPromptEl, closeBuiltinTemplateDetailEl, newTemplateEl, closePersonTemplateEl, closeAddPersonEl } = teamDomRefs
 const { openTemporaryPersonEl, closeTemporaryPersonEl, addRoleFormEl, addLibraryPeopleFormEl, addTemporaryPersonFormEl, peopleLibraryFormEl } = teamDomRefs
 const { templateSiteGeminiEl, templateSiteChatGptEl, templateSiteClaudeEl, templateSiteDeepSeekEl, templateSiteQwenEl, templateSiteKimiEl, templateChatGptGptsFieldEl, templateChatGptGptsUrlEl, temporaryPersonNameEl, temporaryPersonDescriptionEl, temporaryPersonPromptEl } = teamDomRefs
 const { togglePeopleDrawerEl, rolePanelEl, windowLauncherEl } = teamDomRefs
@@ -228,10 +229,18 @@ const peopleLibraryView = createPeopleLibraryView({
   peopleLibrarySummaryEl,
   peopleLibraryListEl,
   peopleLibraryPaginationEl,
+  peopleLibrarySearchEl,
+  peopleLibraryBuiltinTabEl,
+  peopleLibraryCustomTabEl,
   addLibraryPeopleListEl,
   addPersonSearchEl,
   addPersonBuiltinTabEl,
   addPersonCustomTabEl,
+  builtinTemplateDetailModalEl,
+  builtinTemplateDetailTitleEl,
+  builtinTemplateDetailMetaEl,
+  builtinTemplateDetailPromptEl,
+  closeBuiltinTemplateDetailEl,
   roleTemplateSelectEl,
   templateListEl,
   templateNameEl,
