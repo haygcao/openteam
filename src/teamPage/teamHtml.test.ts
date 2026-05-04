@@ -77,8 +77,9 @@ describe('team.html chat creation UI', () => {
   it('uses template default sites for library people and the add-person picker for temporary people', () => {
     const source = readFileSync(resolve(process.cwd(), 'src/teamPage/peopleLibraryView.ts'), 'utf8')
 
-    expect(source).toContain('function addPersonSiteControl(itemKey: string, chatSite: ChatSite): HTMLElement')
-    expect(source).toContain('const chatSite = deps.state.addPersonSiteByKey.get(item.key) ?? item.chatSite')
+    expect(source).toContain('function addPersonSiteControl(itemKey: string, chatSites: ChatSite[], disabledSites: Set<ChatSite>): HTMLElement')
+    expect(source).toContain('function selectedAddPersonSites(itemKey: string, fallbackSite: ChatSite, disabledSites = new Set<ChatSite>()): ChatSite[]')
+    expect(source).toContain("item.chatSites.map(chatSite =>")
     expect(source).toContain("if (item.source === 'library') return { source: 'library', roleTemplateId: item.roleTemplateId, chatSite }")
     expect(source).toContain("source: 'temporary'")
     expect(source).toContain("if (deps.templateSiteClaudeEl.checked) return 'claude'")
@@ -151,7 +152,10 @@ describe('team.html chat creation UI', () => {
     expect(source).toContain("menu.className = 'role-site-menu'")
     expect(source).toContain("option.className = `role-site-option${role.chatSite === site ? ' active' : ''}`")
     expect(source).not.toContain("siteActions.className = 'chat-row tiny'")
+    expect(source).not.toContain('roleSiteBadge(role.chatSite)')
     expect(html).toMatch(/\.site-pill\s*{[^}]*border-radius:\s*999px;/s)
+    expect(html).toMatch(/\.add-person-site-option\s*{[^}]*border-color:\s*rgba\(132,\s*153,\s*171,\s*0\.22\);[^}]*background:\s*rgba\(132,\s*153,\s*171,\s*0\.08\);[^}]*color:\s*var\(--muted\);/s)
+    expect(html).toMatch(/\.add-person-site-option\.active\s*{[^}]*border-color:\s*rgba\(47,\s*216,\s*204,\s*0\.56\);[^}]*background:\s*rgba\(47,\s*216,\s*204,\s*0\.16\);[^}]*color:\s*#eaffff;/s)
     expect(html).toMatch(/\.role-site-menu\s*{[^}]*position:\s*absolute;/s)
   })
 
@@ -159,6 +163,8 @@ describe('team.html chat creation UI', () => {
     const html = readTeamDocument()
 
     expect(html).not.toContain('name="add-person-chat-site"')
+    expect(html).toContain('<button class="btn btn-primary" type="submit">添加人员</button>')
+    expect(html).not.toContain('打开添加人员')
     expect(html).not.toContain('为这次加入群聊的人员统一指定 Gemini。')
     expect(html).not.toContain('为这次加入群聊的人员统一指定 ChatGPT。')
     expect(html).not.toContain('为这次加入群聊的人员统一指定 Claude。')
@@ -346,10 +352,15 @@ describe('team.html chat creation UI', () => {
 
   it('positions the mention panel next to the composer input instead of the right action area', () => {
     const html = readTeamDocument()
+    const source = readFileSync(resolve(process.cwd(), 'src/teamPage/composerView.ts'), 'utf8')
 
+    expect(source).toContain('roleMentionLabel(role)')
+    expect(source).toContain("site.className = `mention-site-badge site-pill-${role.chatSite ?? 'gemini'}`")
     expect(html).toMatch(/\.mention-panel\s*{[^}]*left:\s*12px;/s)
     expect(html).toMatch(/\.mention-panel\s*{[^}]*bottom:\s*calc\(100% \+ 8px\);/s)
     expect(html).toMatch(/\.mention-panel\s*{[^}]*width:\s*min\(280px,\s*calc\(100% - 24px\)\);/s)
+    expect(html).toMatch(/\.mention-name\s*{[^}]*text-overflow:\s*ellipsis;/s)
+    expect(html).toMatch(/\.mention-site-badge\s*{[^}]*border-radius:\s*999px;/s)
     expect(html).not.toMatch(/\.mention-panel\s*{[^}]*right:\s*78px;/s)
   })
 
@@ -418,7 +429,7 @@ describe('team.html chat creation UI', () => {
     expect(source).toContain('renderMessageMentions(message)')
     expect(source).toContain('appendMentionsToBody(body, mentions)')
     expect(source).toContain('message.mentionedRoleIds')
-    expect(source).toContain("mention.textContent = `@${name}`")
+    expect(source).toContain('roleMentionLabel(role)')
     expect(html).toMatch(/\.message-mentions\s*{[^}]*display:\s*inline-flex;/s)
     expect(html).toMatch(/\.message-mention\s*{[^}]*font-weight:\s*820;/s)
   })

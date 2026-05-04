@@ -33,7 +33,7 @@ export interface TeamPageState {
   reconnectingRoleKeys: Set<string>
   roleReadyWaiters: Set<RoleReadyWaiter>
   temporaryPersonDrafts: TemporaryPersonDraft[]
-  addPersonSiteByKey: Map<string, ChatSite>
+  addPersonSiteByKey: Map<string, Set<ChatSite>>
 }
 
 export function createTeamPageState(): TeamPageState {
@@ -47,7 +47,7 @@ export function createTeamPageState(): TeamPageState {
     reconnectingRoleKeys: new Set<string>(),
     roleReadyWaiters: new Set<RoleReadyWaiter>(),
     temporaryPersonDrafts: [],
-    addPersonSiteByKey: new Map<string, ChatSite>(),
+    addPersonSiteByKey: new Map<string, Set<ChatSite>>(),
     peopleLibraryPage: 0,
   }
 }

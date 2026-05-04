@@ -21,7 +21,10 @@ export function parseGroupMentions(raw: string, roles: GroupRole[]): ParsedGroup
     return { ok: true, content: trimmed, targetRoleIds: allRoleIds, mentionedRoleIds: [] }
   }
 
-  const sortedRoles = [...roles].sort((left, right) => right.name.length - left.name.length)
+  const mentionTargets = roles.flatMap(role => [
+    { role, label: roleMentionLabel(role) },
+    { role, label: role.name },
+  ]).sort((left, right) => right.label.length - left.label.length)
   const targetRoleIds = new Set<string>()
   let targetsAll = false
   let content = ''
@@ -40,15 +43,15 @@ export function parseGroupMentions(raw: string, roles: GroupRole[]): ParsedGroup
       continue
     }
 
-    const role = sortedRoles.find(candidate => mentionMatches(trimmed, index, candidate.name))
-    if (!role) {
+    const target = mentionTargets.find(candidate => mentionMatches(trimmed, index, candidate.label))
+    if (!target) {
       content += trimmed[index]
       index += 1
       continue
     }
 
-    targetRoleIds.add(role.id)
-    index += role.name.length + 1
+    targetRoleIds.add(target.role.id)
+    index += target.label.length + 1
   }
 
   const parsedContent = compactContent(content)
@@ -60,6 +63,19 @@ export function parseGroupMentions(raw: string, roles: GroupRole[]): ParsedGroup
     targetRoleIds: targetsAll ? allRoleIds : targetRoleIds.size > 0 ? [...targetRoleIds] : allRoleIds,
     mentionedRoleIds: [...targetRoleIds],
   }
+}
+
+export function roleMentionLabel(role: GroupRole): string {
+  return `${role.name}（${siteLabel(role.chatSite)}）`
+}
+
+function siteLabel(site: GroupRole['chatSite']): string {
+  if (site === 'chatgpt') return 'ChatGPT'
+  if (site === 'claude') return 'Claude'
+  if (site === 'deepseek') return 'DeepSeek'
+  if (site === 'kimi') return 'Kimi'
+  if (site === 'qwen') return '千问'
+  return 'Gemini'
 }
 
 function mentionMatches(raw: string, atIndex: number, target: string): boolean {

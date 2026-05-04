@@ -82,6 +82,34 @@ describe('role template utilities', () => {
     expect(Object.keys(store.roleTemplatesById)).toEqual(['template-1'])
   })
 
+  it('allows the same library person on different chat sites in one chat', () => {
+    const store = createDefaultStore()
+    store.chatsById['chat-1'] = makeChat('chat-1')
+    createRoleTemplate(store, { name: '工程师', systemPrompt: '从工程角度分析' }, 'template-1', 1)
+
+    const roles = createGroupRolesBatch(store, 'chat-1', [
+      { source: 'library', roleTemplateId: 'template-1', chatSite: 'gemini' },
+      { source: 'library', roleTemplateId: 'template-1', chatSite: 'claude' },
+    ], () => `role-${store.chatsById['chat-1'].roleIds.length + 1}`, 2)
+
+    expect(roles).toHaveLength(2)
+    expect(roles.map(role => ({ templateId: role.templateId, name: role.name, chatSite: role.chatSite }))).toEqual([
+      { templateId: 'template-1', name: '工程师', chatSite: 'gemini' },
+      { templateId: 'template-1', name: '工程师', chatSite: 'claude' },
+    ])
+  })
+
+  it('prevents adding the same person to the same chat site twice', () => {
+    const store = createDefaultStore()
+    store.chatsById['chat-1'] = makeChat('chat-1')
+    createRoleTemplate(store, { name: '工程师', systemPrompt: '从工程角度分析' }, 'template-1', 1)
+    createGroupRole(store, { chatId: 'chat-1', templateId: 'template-1', chatSite: 'gemini' }, 'role-1', 2)
+
+    expect(() => createGroupRolesBatch(store, 'chat-1', [
+      { source: 'library', roleTemplateId: 'template-1', chatSite: 'gemini' },
+    ], () => 'role-2', 3)).toThrow('人员已存在：工程师（gemini）')
+  })
+
   it('validates an entire role batch before writing', () => {
     const store = createDefaultStore()
     store.chatsById['chat-1'] = makeChat('chat-1')
@@ -172,6 +200,20 @@ describe('mention parser', () => {
       content: '评估风险',
       targetRoleIds: ['role-product', 'role-pm', 'role-eng'],
       mentionedRoleIds: ['role-eng'],
+    })
+  })
+
+  it('routes same-name roles by their site-qualified mention label', () => {
+    const sameNameRoles = [
+      { ...makeRole('role-gemini', '产品经理'), chatSite: 'gemini' as const },
+      { ...makeRole('role-claude', '产品经理'), chatSite: 'claude' as const },
+    ]
+
+    expect(parseGroupMentions('@产品经理（Claude） 看一下', sameNameRoles)).toEqual({
+      ok: true,
+      content: '看一下',
+      targetRoleIds: ['role-claude'],
+      mentionedRoleIds: ['role-claude'],
     })
   })
 

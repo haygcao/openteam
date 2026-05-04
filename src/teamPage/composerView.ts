@@ -1,4 +1,4 @@
-import { parseGroupMentions } from '../group/mentionParser'
+import { parseGroupMentions, roleMentionLabel } from '../group/mentionParser'
 import type { GroupChat, GroupMessage, GroupRole, MessageReference } from '../group/types'
 import type { TeamPageState } from './appState'
 import { getVisibleThinkingRoles, isUnavailableRolesError, shouldAutoReconnectRole, shouldConfirmMentionWithEnter, shouldSendMessageWithEnter } from './chatExperience'
@@ -57,23 +57,23 @@ export function createComposerView(deps: ComposerViewDependencies): ComposerView
       deps.targetPreviewEl.textContent = parsed.error
       deps.sendButtonEl.disabled = true
     } else if (reconnecting.length > 0) {
-      deps.targetPreviewEl.textContent = `正在自动连接：${reconnecting.map(role => role.name).join('、')}`
+      deps.targetPreviewEl.textContent = `正在自动连接：${reconnecting.map(roleDisplayName).join('、')}`
       deps.sendButtonEl.disabled = true
     } else if (unavailable.length > 0) {
       const waiting = unavailable.filter(role => !shouldAutoReconnectRole(role))
       if (waiting.length > 0) {
-        deps.targetPreviewEl.textContent = `请稍等：${waiting.map(role => role.name).join('、')} 正在回复`
+        deps.targetPreviewEl.textContent = `请稍等：${waiting.map(roleDisplayName).join('、')} 正在回复`
         deps.sendButtonEl.disabled = true
       } else {
-        deps.targetPreviewEl.textContent = `将先自动连接：${unavailable.map(role => role.name).join('、')}`
+        deps.targetPreviewEl.textContent = `将先自动连接：${unavailable.map(roleDisplayName).join('、')}`
         deps.sendButtonEl.disabled = false
       }
     } else {
-      deps.targetPreviewEl.textContent = `将发送给：${targets.map(role => role.name).join('、') || '全部人员'}`
+      deps.targetPreviewEl.textContent = `将发送给：${targets.map(roleDisplayName).join('、') || '全部人员'}`
       deps.sendButtonEl.disabled = false
     }
 
-    deps.busyPreviewEl.textContent = thinking.length > 0 ? `正在回复：${thinking.map(role => role.name).join('、')}` : ''
+    deps.busyPreviewEl.textContent = thinking.length > 0 ? `正在回复：${thinking.map(roleDisplayName).join('、')}` : ''
   }
 
   function renderReferenceDraft(): void {
@@ -115,9 +115,13 @@ export function createComposerView(deps: ComposerViewDependencies): ComposerView
       avatar.className = `mention-avatar ${deps.roleToneClass(role.name)}`
       avatar.textContent = deps.roleAvatarLabel(role.name)
       const name = document.createElement('span')
+      name.className = 'mention-name'
       name.textContent = role.name
+      const site = document.createElement('span')
+      site.className = `mention-site-badge site-pill-${role.chatSite ?? 'gemini'}`
+      site.textContent = siteLabel(role.chatSite)
       option.addEventListener('click', () => insertMention(role))
-      option.append(avatar, name)
+      option.append(avatar, name, site)
       deps.mentionPanelEl.append(option)
     })
   }
@@ -175,7 +179,7 @@ export function createComposerView(deps: ComposerViewDependencies): ComposerView
 
     const waitingRoles = targetResult.roles.filter(role => role.status === 'thinking' && !shouldAutoReconnectRole(role))
     if (waitingRoles.length > 0) {
-      deps.showError(`请等待人员回复完成：${waitingRoles.map(role => role.name).join('、')}`)
+      deps.showError(`请等待人员回复完成：${waitingRoles.map(roleDisplayName).join('、')}`)
       return
     }
 
@@ -252,9 +256,10 @@ export function createComposerView(deps: ComposerViewDependencies): ComposerView
     const rawPrefix = atIndex >= 0 ? value.slice(0, atIndex) : value.slice(0, cursor)
     const prefix = rawPrefix && !/\s$/.test(rawPrefix) ? `${rawPrefix} ` : rawPrefix
     const suffix = value.slice(cursor)
-    const inserted = `${prefix}@${role.name} ${suffix}`
+    const label = roleMentionLabel(role)
+    const inserted = `${prefix}@${label} ${suffix}`
     deps.messageInputEl.value = inserted
-    const nextCursor = prefix.length + role.name.length + 2
+    const nextCursor = prefix.length + label.length + 2
     deps.messageInputEl.setSelectionRange(nextCursor, nextCursor)
     deps.messageInputEl.focus()
     deps.mentionPanelEl.hidden = true
@@ -262,6 +267,19 @@ export function createComposerView(deps: ComposerViewDependencies): ComposerView
   }
 
   return { renderComposerState, registerComposerEvents, insertMention, setReference, submitComposerMessage }
+}
+
+function roleDisplayName(role: GroupRole): string {
+  return roleMentionLabel(role)
+}
+
+function siteLabel(site: GroupRole['chatSite']): string {
+  if (site === 'chatgpt') return 'ChatGPT'
+  if (site === 'claude') return 'Claude'
+  if (site === 'deepseek') return 'DeepSeek'
+  if (site === 'kimi') return 'Kimi'
+  if (site === 'qwen') return '千问'
+  return 'Gemini'
 }
 
 function teamRoleKey(chatId: string, roleId: string): string {

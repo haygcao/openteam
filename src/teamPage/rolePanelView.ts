@@ -1,3 +1,4 @@
+import { roleMentionLabel } from '../group/mentionParser'
 import type { ChatSite, GroupRole, OpenTeamStore, RoleStatus } from '../group/types'
 import type { TeamPageState } from './appState'
 
@@ -69,7 +70,7 @@ export function createRolePanelView(deps: RolePanelViewDependencies): RolePanelV
     name.className = 'role-name'
     name.textContent = role.name
     wireMentionShortcut(name, role)
-    row.append(name, roleSiteBadge(role.chatSite), statusPill(role.status, roleStatusLabel(role.status)))
+    row.append(name, statusPill(role.status, roleStatusLabel(role.status)))
 
     const description = document.createElement('div')
     description.className = 'role-description'
@@ -154,7 +155,7 @@ export function createRolePanelView(deps: RolePanelViewDependencies): RolePanelV
 
   function wireMentionShortcut(element: HTMLElement, role: GroupRole): void {
     element.classList.add('mention-shortcut')
-    element.title = `@${role.name}`
+    element.title = `@${roleMentionLabel(role)}`
     element.addEventListener('click', event => {
       event.stopPropagation()
       deps.insertMention(role)
@@ -174,13 +175,6 @@ function siteLabel(site: ChatSite | undefined): string {
   if (site === 'kimi') return 'Kimi'
   if (site === 'qwen') return '千问'
   return 'Gemini'
-}
-
-function roleSiteBadge(site: ChatSite | undefined): HTMLElement {
-  const badge = document.createElement('span')
-  badge.className = `role-site-badge site-pill-${site ?? 'gemini'}`
-  badge.textContent = siteLabel(site)
-  return badge
 }
 
 function statusPill(status: string, label: string): HTMLElement {

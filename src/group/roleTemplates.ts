@@ -155,11 +155,13 @@ export function createGroupRole(
   const template = input.templateId ? store.roleTemplatesById[input.templateId] : undefined
   if (input.templateId && !template) throw new Error(`找不到人员库人员：${input.templateId}`)
 
-  const name = assertValidRoleName(input.name ?? template?.name ?? '', getChatRoles(store, chat))
+  const name = assertValidRoleName(input.name ?? template?.name ?? '', [])
+  const chatSite = input.chatSite ?? template?.defaultChatSite ?? store.settings.defaultChatSite
+  assertUniqueRoleSiteIdentity(name, chatSite, getChatRoles(store, chat), store.settings.defaultChatSite)
   const role: GroupRole = {
     id,
     chatId: input.chatId,
-    chatSite: input.chatSite ?? template?.defaultChatSite ?? store.settings.defaultChatSite,
+    chatSite,
     name,
     status: 'pending',
     contextCursor: 0,
@@ -197,7 +199,12 @@ export function updateGroupRole(
   const chat = store.chatsById[role.chatId]
   if (!chat) throw new Error(`找不到群聊：${role.chatId}`)
 
-  if (patch.name !== undefined) role.name = assertValidRoleName(patch.name, getChatRoles(store, chat), roleId)
+  const nextName = patch.name !== undefined ? assertValidRoleName(patch.name, []) : role.name
+  const nextChatSite = patch.chatSite ?? role.chatSite ?? store.settings.defaultChatSite
+  if (patch.name !== undefined || (patch.chatSite !== undefined && patch.chatSite !== role.chatSite)) {
+    assertUniqueRoleSiteIdentity(nextName, nextChatSite, getChatRoles(store, chat), store.settings.defaultChatSite, roleId)
+  }
+  if (patch.name !== undefined) role.name = nextName
   if (patch.description !== undefined) {
     const description = patch.description.trim()
     if (description) {
@@ -254,13 +261,12 @@ export function createGroupRolesBatch(
   const chat = store.chatsById[chatId]
   if (!chat) throw new Error(`找不到群聊：${chatId}`)
 
-  const existingNames = getChatRoles(store, chat).map(role => role.name)
   const prepared = items.map((item, index) => prepareBatchItem(store, item, index))
-  const names = [...existingNames]
+  const identities = new Set(getChatRoles(store, chat).map(role => roleSiteIdentityKey(role.name, role.chatSite ?? store.settings.defaultChatSite)))
   for (const item of prepared) {
-    const error = validateRoleName(item.name, names)
-    if (error) throw new Error(error)
-    names.push(item.name)
+    const identityKey = roleSiteIdentityKey(item.name, item.chatSite ?? store.settings.defaultChatSite)
+    if (identities.has(identityKey)) throw new Error(duplicateRoleSiteMessage(item.name, item.chatSite ?? store.settings.defaultChatSite))
+    identities.add(identityKey)
   }
 
   return prepared.map(item => createGroupRole(store, { chatId, ...item }, idFactory(), now))
@@ -272,7 +278,7 @@ function prepareBatchItem(store: OpenTeamStore, item: GroupRoleBatchInput, index
     if (!template) throw new Error(`找不到人员库人员：${item.roleTemplateId}`)
     return {
       templateId: item.roleTemplateId,
-      chatSite: item.chatSite ?? template.defaultChatSite,
+      chatSite: item.chatSite ?? template.defaultChatSite ?? store.settings.defaultChatSite,
       name: assertValidRoleName(template.name, []),
       description: template.description,
       systemPrompt: assertValidSystemPrompt(template.systemPrompt),
@@ -282,7 +288,7 @@ function prepareBatchItem(store: OpenTeamStore, item: GroupRoleBatchInput, index
 
   if (item.source === 'temporary') {
     return {
-      chatSite: item.chatSite,
+      chatSite: item.chatSite ?? store.settings.defaultChatSite,
       name: assertValidRoleName(item.name, []),
       description: item.description,
       systemPrompt: assertValidSystemPrompt(item.systemPrompt),
@@ -291,6 +297,20 @@ function prepareBatchItem(store: OpenTeamStore, item: GroupRoleBatchInput, index
   }
 
   throw new Error(`第 ${index + 1} 个添加项无效`)
+}
+
+function assertUniqueRoleSiteIdentity(name: string, chatSite: ChatSite, existingRoles: GroupRole[], defaultChatSite: ChatSite, currentRoleId?: string): void {
+  const identityKey = roleSiteIdentityKey(name, chatSite)
+  const duplicate = existingRoles.some(role => role.id !== currentRoleId && roleSiteIdentityKey(role.name, role.chatSite ?? defaultChatSite) === identityKey)
+  if (duplicate) throw new Error(duplicateRoleSiteMessage(name, chatSite))
+}
+
+function roleSiteIdentityKey(name: string, chatSite: ChatSite): string {
+  return `${name.trim().toLowerCase()}:${chatSite}`
+}
+
+function duplicateRoleSiteMessage(name: string, chatSite: ChatSite): string {
+  return `人员已存在：${name}（${chatSite}）`
 }
 
 function assertValidSystemPrompt(systemPrompt: string | undefined): string {

@@ -3,8 +3,8 @@ import type { TeamPageState } from './appState'
 
 type TemplateDraft = Pick<RoleTemplate, 'name' | 'description' | 'systemPrompt' | 'defaultChatSite'>
 type AddPersonItem =
-  | { key: string; source: 'library'; roleTemplateId: string; name: string; description?: string; chatSite: ChatSite }
-  | { key: string; source: 'temporary'; draftId: string; name: string; description?: string; systemPrompt: string; chatSite: ChatSite }
+  | { key: string; source: 'library'; roleTemplateId: string; name: string; description?: string; chatSites: ChatSite[]; disabledSites: Set<ChatSite> }
+  | { key: string; source: 'temporary'; draftId: string; name: string; description?: string; systemPrompt: string; chatSites: ChatSite[]; disabledSites: Set<ChatSite> }
 
 const PEOPLE_LIBRARY_PAGE_SIZE = 5
 const VISIBLE_CHAT_SITES = ['gemini', 'chatgpt', 'claude', 'deepseek'] as const
@@ -217,7 +217,7 @@ export function createPeopleLibraryView(deps: PeopleLibraryViewDependencies): Pe
       const store = deps.getStore()
       const chatSite = visibleChatSite(store.settings.defaultChatSite)
       deps.state.temporaryPersonDrafts.push({ id, ...draft, chatSite })
-      deps.state.addPersonSiteByKey.set(`temporary:${id}`, chatSite)
+      deps.state.addPersonSiteByKey.set(`temporary:${id}`, new Set([chatSite]))
       closeTemporaryPersonDialog()
       renderAddPersonDialog()
     })
@@ -334,11 +334,12 @@ export function createPeopleLibraryView(deps: PeopleLibraryViewDependencies): Pe
     }
 
     for (const item of items) {
-      const label = document.createElement('label')
+      const label = document.createElement('div')
       label.className = 'select-row'
       const checkbox = document.createElement('input')
       checkbox.type = 'checkbox'
       checkbox.value = item.key
+      checkbox.disabled = item.chatSites.length === 0
       const content = document.createElement('span')
       content.className = 'select-row-content'
       const name = document.createElement('strong')
@@ -348,9 +349,9 @@ export function createPeopleLibraryView(deps: PeopleLibraryViewDependencies): Pe
       description.textContent = item.description || '未填写描述'
       const site = document.createElement('div')
       site.className = 'template-description'
-      site.textContent = item.source === 'temporary' ? '临时人员' : '人员库'
+      site.textContent = item.chatSites.length === 0 ? '所有可用站点已添加' : item.source === 'temporary' ? '临时人员' : '人员库'
       content.append(name, description, site)
-      label.append(checkbox, content, addPersonSiteControl(item.key, item.chatSite))
+      label.append(checkbox, content, addPersonSiteControl(item.key, item.chatSites, item.disabledSites))
       deps.addLibraryPeopleListEl.append(label)
     }
   }
@@ -359,21 +360,22 @@ export function createPeopleLibraryView(deps: PeopleLibraryViewDependencies): Pe
     const store = deps.getStore()
     const libraryItems = deps.getTemplates().map(template => {
       const key = `library:${template.id}`
-      const chatSite = visibleChatSite(deps.state.addPersonSiteByKey.get(key) ?? template.defaultChatSite ?? store.settings.defaultChatSite)
-      deps.state.addPersonSiteByKey.set(key, chatSite)
+      const disabledSites = usedLibrarySites(template)
+      const chatSites = selectedAddPersonSites(key, template.defaultChatSite ?? store.settings.defaultChatSite, disabledSites)
       return {
         key,
         source: 'library' as const,
         roleTemplateId: template.id,
         name: template.name,
         description: template.description,
-        chatSite,
+        chatSites,
+        disabledSites,
       }
     })
     const temporaryItems = deps.state.temporaryPersonDrafts.map(draft => {
       const key = `temporary:${draft.id}`
-      const chatSite = visibleChatSite(deps.state.addPersonSiteByKey.get(key) ?? draft.chatSite)
-      deps.state.addPersonSiteByKey.set(key, chatSite)
+      const disabledSites = usedNameSites(draft.name)
+      const chatSites = selectedAddPersonSites(key, draft.chatSite, disabledSites)
       return {
         key,
         source: 'temporary' as const,
@@ -381,49 +383,79 @@ export function createPeopleLibraryView(deps: PeopleLibraryViewDependencies): Pe
         name: draft.name,
         description: draft.description,
         systemPrompt: draft.systemPrompt,
-        chatSite,
+        chatSites,
+        disabledSites,
       }
     })
     return [...libraryItems, ...temporaryItems]
   }
 
-  function addPersonSiteControl(itemKey: string, chatSite: ChatSite): HTMLElement {
+  function addPersonSiteControl(itemKey: string, chatSites: ChatSite[], disabledSites: Set<ChatSite>): HTMLElement {
     const control = document.createElement('div')
-    control.className = 'role-site-control'
-    const sitePill = document.createElement('button')
-    sitePill.type = 'button'
-    sitePill.className = `site-pill site-pill-${chatSite}`
-    sitePill.setAttribute('aria-expanded', String(deps.state.addPersonSiteMenuId === itemKey))
-    sitePill.textContent = siteLabel(chatSite)
-    sitePill.addEventListener('click', event => {
-      event.preventDefault()
-      event.stopPropagation()
-      deps.state.addPersonSiteMenuId = deps.state.addPersonSiteMenuId === itemKey ? undefined : itemKey
-      renderAddPersonDialog()
-    })
-    control.append(sitePill)
-    if (deps.state.addPersonSiteMenuId === itemKey) control.append(addPersonSiteMenu(itemKey, chatSite))
+    control.className = 'role-site-control add-person-site-control'
+    const selectedSites = new Set(chatSites)
+    for (const site of VISIBLE_CHAT_SITES) {
+      const option = document.createElement('label')
+      option.className = `site-pill site-pill-${site} add-person-site-option${selectedSites.has(site) ? ' active' : ''}${disabledSites.has(site) ? ' disabled' : ''}`
+      const input = document.createElement('input')
+      input.type = 'checkbox'
+      input.value = site
+      input.checked = selectedSites.has(site)
+      input.disabled = disabledSites.has(site)
+      input.addEventListener('change', event => {
+        event.stopPropagation()
+        if (disabledSites.has(site)) return
+        const nextSites = new Set(selectedAddPersonSites(itemKey, site, disabledSites))
+        if (input.checked) {
+          nextSites.add(site)
+        } else if (nextSites.size > 1) {
+          nextSites.delete(site)
+        } else {
+          input.checked = true
+          return
+        }
+        deps.state.addPersonSiteByKey.set(itemKey, nextSites)
+        renderAddPersonDialog()
+      })
+      option.append(input, document.createTextNode(siteLabel(site)))
+      control.append(option)
+    }
     return control
   }
 
-  function addPersonSiteMenu(itemKey: string, currentSite: ChatSite): HTMLElement {
-    const menu = document.createElement('div')
-    menu.className = 'role-site-menu'
-    menu.addEventListener('click', event => event.stopPropagation())
-    for (const site of VISIBLE_CHAT_SITES) {
-      const option = document.createElement('button')
-      option.type = 'button'
-      option.className = `role-site-option${currentSite === site ? ' active' : ''}`
-      option.textContent = currentSite === site ? `✓ ${siteLabel(site)}` : siteLabel(site)
-      option.addEventListener('click', event => {
-        event.preventDefault()
-        deps.state.addPersonSiteByKey.set(itemKey, site)
-        deps.state.addPersonSiteMenuId = undefined
-        renderAddPersonDialog()
-      })
-      menu.append(option)
+  function selectedAddPersonSites(itemKey: string, fallbackSite: ChatSite, disabledSites = new Set<ChatSite>()): ChatSite[] {
+    const selectedSites = deps.state.addPersonSiteByKey.get(itemKey)
+    const visibleSelectedSites = selectedSites ? VISIBLE_CHAT_SITES.filter(site => selectedSites.has(site) && !disabledSites.has(site)) : []
+    if (visibleSelectedSites.length > 0) return visibleSelectedSites
+
+    const fallback = visibleChatSite(fallbackSite)
+    const nextSite = disabledSites.has(fallback) ? VISIBLE_CHAT_SITES.find(site => !disabledSites.has(site)) : fallback
+    if (!nextSite) {
+      deps.state.addPersonSiteByKey.set(itemKey, new Set())
+      return []
     }
-    return menu
+    deps.state.addPersonSiteByKey.set(itemKey, new Set([nextSite]))
+    return [nextSite]
+  }
+
+  function usedLibrarySites(template: RoleTemplate): Set<ChatSite> {
+    const chat = deps.getCurrentChat()
+    if (!chat) return new Set()
+    const store = deps.getStore()
+    return new Set(chat.roleIds
+      .map(roleId => store.rolesById[roleId])
+      .filter(role => role?.templateId === template.id)
+      .map(role => visibleChatSite(role.chatSite ?? store.settings.defaultChatSite)))
+  }
+
+  function usedNameSites(name: string): Set<ChatSite> {
+    const chat = deps.getCurrentChat()
+    if (!chat) return new Set()
+    const store = deps.getStore()
+    return new Set(chat.roleIds
+      .map(roleId => store.rolesById[roleId])
+      .filter(role => role?.name.trim().toLowerCase() === name.trim().toLowerCase())
+      .map(role => visibleChatSite(role.chatSite ?? store.settings.defaultChatSite)))
   }
 
   function readTemplateDraft(): TemplateDraft {
@@ -444,8 +476,7 @@ export function createPeopleLibraryView(deps: PeopleLibraryViewDependencies): Pe
 
   function selectedAddPersonItems(): Record<string, unknown>[] {
     const checkedKeys = new Set(Array.from(deps.addLibraryPeopleListEl.querySelectorAll<HTMLInputElement>('input[type="checkbox"]:checked')).map(input => input.value))
-    return addPersonItems().filter(item => checkedKeys.has(item.key)).map(item => {
-      const chatSite = deps.state.addPersonSiteByKey.get(item.key) ?? item.chatSite
+    return addPersonItems().filter(item => checkedKeys.has(item.key)).flatMap(item => item.chatSites.map(chatSite => {
       if (item.source === 'library') return { source: 'library', roleTemplateId: item.roleTemplateId, chatSite }
       return {
         source: 'temporary',
@@ -454,7 +485,7 @@ export function createPeopleLibraryView(deps: PeopleLibraryViewDependencies): Pe
         systemPrompt: item.systemPrompt,
         chatSite,
       }
-    })
+    }))
   }
 
   function readTemplateChatSite(): ChatSite {

@@ -1,4 +1,5 @@
 import MarkdownIt from 'markdown-it'
+import { roleMentionLabel } from '../group/mentionParser'
 import type { GroupChat, GroupMessage, GroupRole, MessageReference, OpenTeamStore } from '../group/types'
 import type { TeamPageState } from './appState'
 import { buildChatRenderItems, getChatStartupNotice, getStoppedReplyRoles, getVisibleThinkingRoles, THINKING_TIMEOUT_MS } from './chatExperience'
@@ -263,15 +264,15 @@ export function createMessagesView(deps: MessagesViewDependencies): MessagesView
   function renderMessageMentions(message: GroupMessage): HTMLElement | undefined {
     if (!message.mentionedRoleIds?.length) return undefined
     const store = deps.getStore()
-    const names = message.mentionedRoleIds.map(roleId => store.rolesById[roleId]?.name).filter((name): name is string => Boolean(name))
-    if (names.length === 0) return undefined
+    const roles = message.mentionedRoleIds.map(roleId => store.rolesById[roleId]).filter((role): role is GroupRole => Boolean(role))
+    if (roles.length === 0) return undefined
 
     const mentions = document.createElement('div')
     mentions.className = 'message-mentions'
-    for (const name of names) {
+    for (const role of roles) {
       const mention = document.createElement('span')
       mention.className = 'message-mention'
-      mention.textContent = `@${name}`
+      mention.textContent = `@${roleMentionLabel(role)}`
       mentions.append(mention)
     }
     return mentions
@@ -386,7 +387,7 @@ export function createMessagesView(deps: MessagesViewDependencies): MessagesView
   function wireMentionShortcut(element: HTMLElement, role: GroupRole | undefined): void {
     if (!role) return
     element.classList.add('mention-shortcut')
-    element.title = `@${role.name}`
+    element.title = `@${roleMentionLabel(role)}`
     element.addEventListener('click', event => {
       event.stopPropagation()
       deps.insertMention(role)
