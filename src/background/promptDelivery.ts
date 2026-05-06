@@ -1,7 +1,9 @@
 import type { SendPromptMessage } from '../group/runtimeProtocol'
+import type { ChatSite } from '../group/types'
 
 export interface PromptDelivery {
   roleId: string
+  chatSite?: ChatSite
   tabId: number
   frameId: number
   message: SendPromptMessage

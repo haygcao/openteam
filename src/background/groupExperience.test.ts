@@ -427,6 +427,37 @@ describe('background group chat experience handlers', () => {
     expect(productPrompt.content).not.toContain('第一条只给工程师的问题')
   })
 
+  it('waits for Deepseek replies before sending the next two prompts', async () => {
+    const roleIds = ['role-1', 'role-2', 'role-3', 'role-4']
+    const store = makeStore()
+    store.currentChatId = 'chat-1'
+    store.chatsById['chat-1'] = makeChat('chat-1', roleIds)
+    store.chatOrder = ['chat-1']
+    roleIds.forEach((roleId, index) => {
+      store.rolesById[roleId] = makeRole('chat-1', roleId, `Deepseek ${index + 1}`, { chatSite: 'deepseek' })
+    })
+    const harness = await setupBackground(store)
+
+    for (const [index, roleId] of roleIds.entries()) {
+      await harness.invoke(
+        { type: 'TEAM_FRAME_ROLE_READY', chatId: 'chat-1', roleId, hostTabId: 900 },
+        { tab: { id: 101 + index } as chrome.tabs.Tab, frameId: 7 + index, url: `https://chat.deepseek.com/a/chat/s/${roleId}` },
+      )
+    }
+
+    const response = await harness.invoke({ type: 'GROUP_MESSAGE_SEND', chatId: 'chat-1', raw: '请一起评估这个方案' }) as { ok: boolean; message: { id: string } }
+
+    expect(response.ok).toBe(true)
+    expect(promptRoleIds(harness)).toEqual(['role-1', 'role-2'])
+
+    await harness.invoke({ type: 'TEAM_ROLE_REPLY', chatId: 'chat-1', roleId: 'role-1', messageId: response.message.id, content: '第一位回复' })
+    expect(promptRoleIds(harness)).toEqual(['role-1', 'role-2', 'role-3'])
+
+    await harness.invoke({ type: 'TEAM_ROLE_REPLY', chatId: 'chat-1', roleId: 'role-2', messageId: response.message.id, content: '第二位回复' })
+    await waitForPromptCallCount(harness, 4)
+    expect(promptRoleIds(harness)).toEqual(roleIds)
+  })
+
   it('marks delivery error when a prompt response is explicitly rejected', async () => {
     const store = makeStore()
     store.currentChatId = 'chat-1'
@@ -1109,4 +1140,18 @@ function makeRole(chatId: string, id: string, name: string, overrides: Partial<G
     updatedAt: 1,
     ...overrides,
   }
+}
+
+function promptRoleIds(harness: BackgroundHarness): string[] {
+  return harness.tabsSendMessage.mock.calls
+    .filter(call => call[1]?.type === 'TEAM_SEND_PROMPT')
+    .map(call => call[1].roleId)
+}
+
+async function waitForPromptCallCount(harness: BackgroundHarness, count: number): Promise<void> {
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    if (promptRoleIds(harness).length === count) return
+    await new Promise(resolve => setTimeout(resolve, 0))
+  }
+  expect(promptRoleIds(harness)).toHaveLength(count)
 }

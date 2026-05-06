@@ -47,6 +47,8 @@ export interface MessageHandlersDependencies {
 }
 
 export function createMessageHandlers(deps: MessageHandlersDependencies): BackgroundMessageRoute[] {
+  const deepSeekPromptBatcher = createDeepSeekPromptBatcher(deps)
+
   const handleMessageSend = async (message: RuntimeMessage) => {
     const chatId = requireString(message.chatId, '缺少群聊 ID')
     const raw = requireString(message.raw, '消息内容不能为空')
@@ -131,6 +133,7 @@ export function createMessageHandlers(deps: MessageHandlersDependencies): Backgr
 
         return {
           roleId,
+          chatSite: role.chatSite ?? store.settings.defaultChatSite,
           tabId: binding.tabId,
           frameId: binding.frameId,
           message: { type: 'TEAM_SEND_PROMPT', chatId: chat.id, roleId, messageId: userMessage.id, replyAttemptId, content, includesPersona },
@@ -143,18 +146,11 @@ export function createMessageHandlers(deps: MessageHandlersDependencies): Backgr
     deps.log.info('message-send:deliveries-ready', {
       chatId,
       messageId: result.message.id,
-      deliveries: result.deliveries.map(delivery => ({ roleId: delivery.roleId, tabId: delivery.tabId, frameId: delivery.frameId, contentLength: delivery.message.content.length })),
+      deliveries: result.deliveries.map(delivery => ({ roleId: delivery.roleId, chatSite: delivery.chatSite, tabId: delivery.tabId, frameId: delivery.frameId, contentLength: delivery.message.content.length })),
     })
     await deps.broadcastStoreUpdated(store)
 
-    for (const delivery of result.deliveries) {
-      try {
-        await deps.sendPrompt(delivery)
-      } catch (error) {
-        const reason = error instanceof Error ? error.message : String(error)
-        await markDeliveryError(deps, chatId, delivery.roleId, result.message.id, reason)
-      }
-    }
+    await sendPromptDeliveries(deps, deepSeekPromptBatcher, chatId, result.message.id, result.deliveries)
 
     return { ok: true, message: result.message, deliveries: result.deliveries.map(delivery => ({ roleId: delivery.roleId })), store }
   }
@@ -195,6 +191,7 @@ export function createMessageHandlers(deps: MessageHandlersDependencies): Backgr
       return {
         delivery: {
           roleId,
+          chatSite: role.chatSite ?? store.settings.defaultChatSite,
           tabId: binding.tabId,
           frameId: binding.frameId,
           message: { type: 'TEAM_SEND_PROMPT' as const, chatId: chat.id, roleId, messageId: userMessage.id, replyAttemptId, content, includesPersona },
@@ -519,6 +516,7 @@ export function createMessageHandlers(deps: MessageHandlersDependencies): Backgr
 
     deps.log.info('role-reply:stored', { chatId: result.reply.chatId, roleId: result.reply.roleId, replyMessageId: result.reply.id })
     await deps.broadcastStoreUpdated(store)
+    if (promptMessageId) await deepSeekPromptBatcher.complete(identity.chatId, promptMessageId, identity.roleId)
     return { ok: true, message: result.reply, store }
   }
 
@@ -577,6 +575,7 @@ export function createMessageHandlers(deps: MessageHandlersDependencies): Backgr
 
     await deps.broadcastStoreUpdated(store)
     await deps.sendError(reason)
+    if (promptMessageId) await deepSeekPromptBatcher.complete(identity.chatId, promptMessageId, identity.roleId)
     return { ok: true, store }
   }
 
@@ -678,6 +677,90 @@ async function markDeliveryError(deps: MessageHandlersDependencies, chatId: stri
   })
   await deps.broadcastStoreUpdated(store)
   await deps.sendError(reason)
+}
+
+interface DeepSeekPromptBatcher {
+  enqueue(chatId: string, messageId: string, deliveries: PromptDelivery[]): Promise<void>
+  complete(chatId: string, messageId: string, roleId: string): Promise<void>
+}
+
+interface DeepSeekPromptBatchState {
+  chatId: string
+  messageId: string
+  pending: PromptDelivery[]
+  activeRoleIds: Set<string>
+}
+
+function createDeepSeekPromptBatcher(deps: MessageHandlersDependencies): DeepSeekPromptBatcher {
+  const batches = new Map<string, DeepSeekPromptBatchState>()
+
+  const pump = async (state: DeepSeekPromptBatchState): Promise<void> => {
+    const launched: Array<Promise<void>> = []
+    while (state.activeRoleIds.size < 2 && state.pending.length > 0) {
+      const delivery = state.pending.shift()!
+      state.activeRoleIds.add(delivery.roleId)
+      deps.log.info('deepseek-prompt:batch-send', {
+        chatId: state.chatId,
+        messageId: state.messageId,
+        roleId: delivery.roleId,
+        activeCount: state.activeRoleIds.size,
+        remainingCount: state.pending.length,
+      })
+      launched.push(sendPromptDelivery(deps, state.chatId, state.messageId, delivery).then(async sent => {
+        if (!sent) await complete(state.chatId, state.messageId, delivery.roleId)
+      }))
+    }
+    await Promise.all(launched)
+  }
+
+  const complete = async (chatId: string, messageId: string, roleId: string): Promise<void> => {
+    const key = deepSeekBatchKey(chatId, messageId)
+    const state = batches.get(key)
+    if (!state || !state.activeRoleIds.delete(roleId)) return
+    if (state.pending.length === 0 && state.activeRoleIds.size === 0) {
+      batches.delete(key)
+      return
+    }
+    await pump(state)
+  }
+
+  return {
+    async enqueue(chatId, messageId, deliveries) {
+      if (deliveries.length === 0) return
+      const key = deepSeekBatchKey(chatId, messageId)
+      const state: DeepSeekPromptBatchState = { chatId, messageId, pending: [...deliveries], activeRoleIds: new Set() }
+      batches.set(key, state)
+      await pump(state)
+    },
+    complete,
+  }
+}
+
+async function sendPromptDeliveries(deps: MessageHandlersDependencies, deepSeekPromptBatcher: DeepSeekPromptBatcher, chatId: string, messageId: string, deliveries: PromptDelivery[]): Promise<void> {
+  const deepSeekDeliveries: PromptDelivery[] = []
+  for (const delivery of deliveries) {
+    if (delivery.chatSite === 'deepseek') {
+      deepSeekDeliveries.push(delivery)
+      continue
+    }
+    await sendPromptDelivery(deps, chatId, messageId, delivery)
+  }
+  await deepSeekPromptBatcher.enqueue(chatId, messageId, deepSeekDeliveries)
+}
+
+async function sendPromptDelivery(deps: MessageHandlersDependencies, chatId: string, messageId: string, delivery: PromptDelivery): Promise<boolean> {
+  try {
+    await deps.sendPrompt(delivery)
+    return true
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error)
+    await markDeliveryError(deps, chatId, delivery.roleId, messageId, reason)
+    return false
+  }
+}
+
+function deepSeekBatchKey(chatId: string, messageId: string): string {
+  return `${chatId}:${messageId}`
 }
 
 function isStaleThinkingRole(role: GroupRole, timestamp: number): boolean {
