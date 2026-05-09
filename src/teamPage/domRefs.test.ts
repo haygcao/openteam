@@ -41,6 +41,7 @@ describe('team page dom refs', () => {
       <button id="close-orchestration"></button>
       <div id="orchestration-modal"></div>
       <textarea id="orchestration-task"></textarea>
+      <button id="auto-orchestration"></button>
       <div id="orchestration-people-list"></div>
       <button id="arrange-orchestration"></button>
       <div id="orchestration-stage-canvas"></div>
@@ -145,6 +146,7 @@ describe('team page dom refs', () => {
     expect(refs.appShellEl.id).toBe('app')
     expect(refs.toggleFullscreenEl.id).toBe('toggle-fullscreen')
     expect(refs.openOrchestrationEl.id).toBe('open-orchestration')
+    expect(refs.autoOrchestrationEl.id).toBe('auto-orchestration')
     expect(refs.orchestrationMaxRoundsEl.id).toBe('orchestration-max-rounds')
     expect(refs.windowResizeHandleEl.id).toBe('window-resize-handle')
     expect(refs.messageInputEl.tagName).toBe('TEXTAREA')

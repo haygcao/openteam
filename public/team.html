@@ -474,7 +474,10 @@
         </div>
         <div class="orchestration-task-strip">
           <label class="field" for="orchestration-task">任务</label>
-          <textarea id="orchestration-task" placeholder="描述要让编排流程完成的任务；不需要 @ 人员。"></textarea>
+          <div class="orchestration-task-input-row">
+            <textarea id="orchestration-task" placeholder="描述要让编排流程完成的任务；不需要 @ 人员。"></textarea>
+            <button id="auto-orchestration" class="btn orchestration-auto" type="button">自动编排</button>
+          </div>
         </div>
         <div class="orchestration-layout">
           <aside class="orchestration-sidebar">

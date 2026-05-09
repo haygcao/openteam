@@ -52,6 +52,7 @@ interface Harness {
     orchestrationModalEl: HTMLElement
     closeOrchestrationEl: HTMLButtonElement
     orchestrationTaskEl: HTMLTextAreaElement
+    autoOrchestrationEl: HTMLButtonElement
     orchestrationPeopleListEl: HTMLElement
     arrangeOrchestrationEl: HTMLButtonElement
     orchestrationCanvasEl: HTMLElement
@@ -63,6 +64,7 @@ interface Harness {
     runOrchestrationEl: HTMLButtonElement
   }
   store: OpenTeamStore
+  sendRuntimeMessage: Mock<[string, Record<string, unknown>?], Promise<{ ok?: boolean; store?: OpenTeamStore; flow?: OrchestrationFlow; createdRoleIds?: string[]; reusedRoleIds?: string[] }>>
   runCommand: Mock<[string, Record<string, unknown>?], Promise<void>>
   reconnectRolesForSend: Mock<[GroupChat, GroupRole[]], Promise<void>>
   errors: string[]
@@ -75,6 +77,7 @@ function createHarness(): Harness {
     <div id="orchestration-modal" hidden>
       <button id="close-orchestration"></button>
       <textarea id="orchestration-task"></textarea>
+      <button id="auto-orchestration"></button>
       <div id="orchestration-people-list"></div>
       <button id="arrange-orchestration"></button>
       <div id="orchestration-stage-canvas"></div>
@@ -109,6 +112,7 @@ function createHarness(): Harness {
       orchestrationModalEl: document.querySelector('#orchestration-modal') as HTMLElement,
       closeOrchestrationEl: document.querySelector('#close-orchestration') as HTMLButtonElement,
       orchestrationTaskEl: document.querySelector('#orchestration-task') as HTMLTextAreaElement,
+      autoOrchestrationEl: document.querySelector('#auto-orchestration') as HTMLButtonElement,
       orchestrationPeopleListEl: document.querySelector('#orchestration-people-list') as HTMLElement,
       arrangeOrchestrationEl: document.querySelector('#arrange-orchestration') as HTMLButtonElement,
       orchestrationCanvasEl: document.querySelector('#orchestration-stage-canvas') as HTMLElement,
@@ -120,6 +124,7 @@ function createHarness(): Harness {
       runOrchestrationEl: document.querySelector('#run-orchestration') as HTMLButtonElement,
     },
     store,
+    sendRuntimeMessage: vi.fn<[string, Record<string, unknown>?], Promise<{ ok?: boolean; store?: OpenTeamStore; flow?: OrchestrationFlow; createdRoleIds?: string[]; reusedRoleIds?: string[] }>>(async () => ({ ok: true })),
     runCommand: vi.fn<[string, Record<string, unknown>?], Promise<void>>(async () => undefined),
     reconnectRolesForSend: vi.fn<[GroupChat, GroupRole[]], Promise<void>>(async () => undefined),
     errors: [],
@@ -131,9 +136,13 @@ function createView(harness: Harness): ReturnType<typeof createOrchestrationModa
   return createOrchestrationModalView({
     ...harness.refs,
     getStore: () => harness.store,
+    applyStore: nextStore => {
+      harness.store = nextStore
+    },
     getCurrentChat: () => harness.store.currentChatId ? harness.store.chatsById[harness.store.currentChatId] : undefined,
     getCurrentRoles: () => harness.store.currentChatId ? harness.store.chatsById[harness.store.currentChatId].roleIds.map(roleId => harness.store.rolesById[roleId]) : [],
     reconnectRolesForSend: harness.reconnectRolesForSend,
+    sendRuntimeMessage: harness.sendRuntimeMessage,
     runCommand: harness.runCommand,
     showError: message => harness.errors.push(message),
     showSuccess: message => harness.successes.push(message),
@@ -144,6 +153,7 @@ function createView(harness: Harness): ReturnType<typeof createOrchestrationModa
 describe('orchestration modal view', () => {
   beforeEach(() => {
     vi.restoreAllMocks()
+    vi.stubGlobal('confirm', vi.fn(() => true))
     MockGraph.instances = []
   })
 
@@ -426,6 +436,57 @@ describe('orchestration modal view', () => {
 
     expect(harness.reconnectRolesForSend).toHaveBeenCalledWith(harness.store.chatsById['chat-1'], [harness.store.rolesById['role-1'], harness.store.rolesById['role-2']])
     expect(harness.runCommand.mock.invocationCallOrder[0]).toBeGreaterThan(harness.reconnectRolesForSend.mock.invocationCallOrder[0])
+  })
+
+  it('auto-generates a draft with returned roles and graph edges', async () => {
+    const harness = createHarness()
+    const generatedStore = structuredClone(harness.store)
+    generatedStore.chatsById['chat-1'].roleIds.push('role-new')
+    generatedStore.rolesById['role-new'] = { id: 'role-new', chatId: 'chat-1', name: '写手', chatSite: 'deepseek', status: 'pending', contextCursor: 0, createdAt: 2, updatedAt: 2 }
+    const generatedFlow: OrchestrationFlow = {
+      id: 'flow-auto',
+      chatId: 'chat-1',
+      name: '自动流程',
+      description: '自动任务',
+      stages: [
+        { id: 'stage-plan', kind: 'roles', name: '规划', roleIds: ['role-1'], description: '拆解任务' },
+        { id: 'stage-write', kind: 'roles', name: '写作', roleIds: ['role-new'], description: '输出初稿' },
+        { id: 'stage-review', kind: 'review', name: '审核', roleIds: ['role-2'], description: '判断质量', review: { reviewerRoleIds: ['role-2'], instructions: '必须可交付', maxAttempts: 3, onMaxAttempts: 'stop' } },
+      ],
+      graph: {
+        stageNodes: [
+          { id: 'stage-plan', kind: 'roles', name: '规划', roleIds: ['role-1'], description: '拆解任务' },
+          { id: 'stage-write', kind: 'roles', name: '写作', roleIds: ['role-new'], description: '输出初稿' },
+          { id: 'stage-review', kind: 'review', name: '审核', roleIds: ['role-2'], description: '判断质量', review: { reviewerRoleIds: ['role-2'], instructions: '必须可交付', maxAttempts: 3, onMaxAttempts: 'stop' } },
+        ],
+        edges: [
+          { sourceStageId: 'stage-plan', targetStageId: 'stage-write' },
+          { sourceStageId: 'stage-write', targetStageId: 'stage-review' },
+          { sourceStageId: 'stage-review', targetStageId: 'stage-write', sourcePort: 'fail' },
+        ],
+      },
+      maxNodeExecutions: 30,
+      maxRounds: 30,
+      createdAt: 2,
+      updatedAt: 2,
+    }
+    harness.sendRuntimeMessage.mockResolvedValue({ ok: true, store: generatedStore, flow: generatedFlow, createdRoleIds: ['role-new'], reusedRoleIds: ['role-1', 'role-2'] })
+    const view = createView(harness)
+    view.registerOrchestrationEvents()
+    harness.refs.openOrchestrationEl.click()
+    harness.refs.orchestrationTaskEl.value = '写一篇文章'
+
+    harness.refs.autoOrchestrationEl.click()
+    await flushAsync()
+
+    expect(harness.sendRuntimeMessage).toHaveBeenCalledWith('GROUP_ORCHESTRATION_AUTO_GENERATE', { chatId: 'chat-1', task: '写一篇文章', flowId: undefined })
+    expect(harness.refs.orchestrationPeopleListEl.textContent).toContain('写手')
+    expect(harness.successes[harness.successes.length - 1]).toContain('新增 1 个 DeepSeek 人员')
+    harness.refs.saveOrchestrationEl.click()
+    await flushAsync()
+    const savePayload = harness.runCommand.mock.calls.find(call => call[0] === 'GROUP_ORCHESTRATION_FLOW_SAVE')?.[1] as { flow?: OrchestrationFlow }
+    expect(savePayload.flow?.stages.map(stage => stage.id)).toEqual(['stage-plan', 'stage-write', 'stage-review'])
+    expect(savePayload.flow?.graph?.edges).toContainEqual({ sourceStageId: 'stage-review', targetStageId: 'stage-write', sourcePort: 'fail', vertices: expect.any(Array) })
   })
 
   it('ignores repeated run clicks while the first run is still starting', async () => {

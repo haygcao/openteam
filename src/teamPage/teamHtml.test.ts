@@ -164,6 +164,7 @@ describe('team.html chat creation UI', () => {
     expect(railActions).not.toContain('id="open-orchestration"')
     expect(html).toContain('id="orchestration-modal"')
     expect(html).toContain('id="orchestration-task"')
+    expect(html).toContain('id="auto-orchestration"')
     expect(html).toContain('id="orchestration-people-list"')
     expect(html).toContain('id="arrange-orchestration"')
     expect(html).toContain('id="orchestration-stage-canvas"')
@@ -181,6 +182,7 @@ describe('team.html chat creation UI', () => {
     expect(html).not.toContain('审核阶段')
     expect(html).toContain('不需要 @ 人员')
     expect(html).toContain('class="orchestration-task-strip"')
+    expect(html).toContain('class="orchestration-task-input-row"')
     expect(html).toContain('class="orchestration-footer"')
     expect(html).toMatch(/\.orchestration-layout\s*{[^}]*grid-template-columns:\s*220px minmax\(450px, 1fr\) 300px;/s)
     expect(html).toMatch(/\.orchestration-stage-canvas\s*{[^}]*min-height:\s*520px;/s)
@@ -501,7 +503,7 @@ describe('team.html chat creation UI', () => {
     expect(source).toContain("createMessageIconButton('重新发送'")
     expect(source).not.toContain("打断重试")
     expect(recoverySource).toContain("runCommand('GROUP_ROLE_STOP_REPLY'")
-    expect(recoverySource).toContain("runCommand('GROUP_ROLE_RETRY_REPLY'")
+    expect(recoverySource).toContain("type: 'GROUP_ROLE_RETRY_REPLY'")
   })
 
   it('keeps add-person sites per person and moves temporary people into a separate draft flow', () => {

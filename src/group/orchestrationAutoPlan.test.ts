@@ -1,0 +1,85 @@
+import { describe, expect, it } from 'vitest'
+import { createDefaultStore } from './store'
+import type { GroupRole } from './types'
+import { buildAutoOrchestrationPrompt, normalizeAutoOrchestrationPlan, parseAutoOrchestrationPlan } from './orchestrationAutoPlan'
+
+describe('orchestration auto plan', () => {
+  it('normalizes model JSON with parallel fan-out and review fail branch', () => {
+    const plan = parseAutoOrchestrationPlan(JSON.stringify({
+      flowName: '文章流程',
+      maxNodeExecutions: 30,
+      roles: [
+        { key: 'pm', reuseRoleId: 'role-pm', name: '产品经理', preferredSite: 'chatgpt' },
+        { key: 'writer', name: '写手', description: '写正文', systemPrompt: '写清楚。', preferredSite: 'chatgpt' },
+        { key: 'reviewer', name: '审核员', description: '审核质量', systemPrompt: '只判断 pass/fail。', preferredSite: 'deepseek' },
+      ],
+      nodes: [
+        { id: 'plan', kind: 'execute', roleKeys: ['pm'], title: '规划', instruction: '拆解目标' },
+        { id: 'write', kind: 'execute', roleKeys: ['writer'], title: '写作', instruction: '完成初稿' },
+        { id: 'risk', kind: 'execute', roleKeys: ['reviewer'], title: '风险检查', instruction: '检查风险' },
+        { id: 'review', kind: 'review', roleKeys: ['reviewer'], title: '审核', instruction: '判断是否通过', review: { criteria: '必须可交付', maxAttempts: 3, onMaxAttempts: 'stop' } },
+      ],
+      edges: [
+        { from: 'plan', to: 'write' },
+        { from: 'plan', to: 'risk' },
+        { from: 'write', to: 'review' },
+        { from: 'risk', to: 'review' },
+        { from: 'review', to: 'write', branch: 'fail' },
+      ],
+    }), new Set(['role-pm']))
+
+    expect(plan.roles.find(role => role.key === 'writer')?.preferredSite).toBe('deepseek')
+    expect(plan.edges).toEqual([
+      { from: 'plan', to: 'write' },
+      { from: 'plan', to: 'risk' },
+      { from: 'write', to: 'review' },
+      { from: 'risk', to: 'review' },
+      { from: 'review', to: 'write', branch: 'fail' },
+    ])
+  })
+
+  it('serializes same-role parallel nodes with an extra dependency edge', () => {
+    const plan = normalizeAutoOrchestrationPlan({
+      flowName: '串行化同人并行',
+      roles: [{ key: 'writer', name: '写手', preferredSite: 'deepseek' }],
+      nodes: [
+        { id: 'start', kind: 'execute', roleKeys: ['writer'], title: '开始', instruction: '开始' },
+        { id: 'a', kind: 'execute', roleKeys: ['writer'], title: 'A', instruction: 'A' },
+        { id: 'b', kind: 'execute', roleKeys: ['writer'], title: 'B', instruction: 'B' },
+      ],
+      edges: [
+        { from: 'start', to: 'a' },
+        { from: 'start', to: 'b' },
+      ],
+    }, new Set())
+
+    expect(plan.edges).toContainEqual({ from: 'a', to: 'b' })
+  })
+
+  it('rejects invalid role and edge references', () => {
+    expect(() => normalizeAutoOrchestrationPlan({
+      flowName: '坏流程',
+      roles: [{ key: 'pm', reuseRoleId: 'missing', name: '产品经理' }],
+      nodes: [{ id: 'n1', kind: 'execute', roleKeys: ['pm'], title: '执行', instruction: '执行' }],
+      edges: [],
+    }, new Set(['role-pm']))).toThrow('reuseRoleId 不存在')
+
+    expect(() => normalizeAutoOrchestrationPlan({
+      flowName: '坏流程',
+      roles: [{ key: 'pm', name: '产品经理' }],
+      nodes: [{ id: 'n1', kind: 'execute', roleKeys: ['pm'], title: '执行', instruction: '执行' }],
+      edges: [{ from: 'n1', to: 'missing' }],
+    }, new Set())).toThrow('连线引用了不存在的节点')
+  })
+
+  it('builds a prompt that tells the planner to use existing roles first and DeepSeek for new roles', () => {
+    const store = createDefaultStore()
+    const role: GroupRole = { id: 'role-1', chatId: 'chat-1', name: '产品经理', chatSite: 'chatgpt', description: '做产品', status: 'ready', contextCursor: 0, createdAt: 1, updatedAt: 1 }
+    const prompt = buildAutoOrchestrationPrompt({ task: '做一个方案', existingRoles: [role], store })
+
+    expect(prompt).toContain('优先复用 existingRoles')
+    expect(prompt).toContain('preferredSite 必须使用 "deepseek"')
+    expect(prompt).toContain('不要创建 kind=parallel')
+    expect(prompt).toContain('"id": "role-1"')
+  })
+})

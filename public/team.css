@@ -3189,10 +3189,24 @@ select:focus {
   font-weight: 820;
 }
 
+.orchestration-task-input-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: stretch;
+  gap: 10px;
+  min-width: 0;
+}
+
 #orchestration-task {
   min-height: 62px;
   max-height: 92px;
   resize: vertical;
+}
+
+.orchestration-auto {
+  align-self: stretch;
+  min-width: 104px;
+  padding-inline: 16px;
 }
 
 .orchestration-layout {

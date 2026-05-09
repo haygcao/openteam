@@ -3,12 +3,24 @@ import {
   DEFAULT_ORCHESTRATION_MAX_ROUNDS,
   MAX_ORCHESTRATION_MAX_NODE_EXECUTIONS,
   MAX_ORCHESTRATION_MAX_ROUNDS,
+  type ChatSite,
+  type GroupChat,
+  type GroupRole,
   type OrchestrationFlow,
+  type OrchestrationGraphSnapshot,
+  type OrchestrationStage,
   type OpenTeamStore,
 } from '../group/types'
+import {
+  buildAutoOrchestrationPrompt,
+  buildAutoOrchestrationRepairPrompt,
+  parseAutoOrchestrationPlan,
+  type AutoOrchestrationPlan,
+} from '../group/orchestrationAutoPlan'
+import { createGroupRole } from '../group/roleTemplates'
 import type { BackgroundMessageRoute } from './messageRouter'
 import { type RuntimeMessage } from './runtimeClient'
-import { mutateStore, requireChat } from './storeAccess'
+import { getChatRoles, mutateStore, requireChat } from './storeAccess'
 import {
   type OrchestrationRuntimeDependencies,
   resumeOrchestrationRun,
@@ -43,9 +55,55 @@ export function createOrchestrationHandlers(deps: OrchestrationHandlersDependenc
     return { ok: true, store }
   }
 
+  const handleAutoGenerate = async (message: RuntimeMessage) => {
+    const chatId = requireString(message.chatId, '缺少群聊 ID')
+    const task = requireString(message.task, '自动编排任务不能为空')
+    const flowId = readOptionalString(message.flowId)
+    const snapshot = await mutateStore(store => {
+      const chat = requireChat(store, chatId)
+      const roles = getChatRoles(store, chat)
+      const plannerModelId = readOptionalString(message.plannerModelId) ?? store.settings.externalModelOrder[0]
+      const model = plannerModelId ? store.settings.externalModelsById[plannerModelId] : undefined
+      if (!model) throw new Error('请先配置外部模型后再使用自动编排')
+      return { chat: { ...chat }, roles: roles.map(role => ({ ...role })), model, store: structuredClone(store) as OpenTeamStore }
+    })
+
+    const externalModelClient = deps.externalModelClient
+    if (!externalModelClient) throw new Error('自动编排模型客户端不可用')
+    const prompt = buildAutoOrchestrationPrompt({ task, existingRoles: snapshot.result.roles, store: snapshot.result.store })
+    const first = await externalModelClient.complete({ model: snapshot.result.model, prompt })
+    const existingRoleIds = new Set(snapshot.result.roles.map(role => role.id))
+    let plan: AutoOrchestrationPlan
+    try {
+      plan = parseAutoOrchestrationPlan(first.content, existingRoleIds)
+    } catch (error) {
+      const repairPrompt = buildAutoOrchestrationRepairPrompt({
+        task,
+        existingRoles: snapshot.result.roles,
+        store: snapshot.result.store,
+        invalidOutput: first.content,
+        error: error instanceof Error ? error.message : String(error),
+      })
+      const repaired = await externalModelClient.complete({ model: snapshot.result.model, prompt: repairPrompt })
+      plan = parseAutoOrchestrationPlan(repaired.content, existingRoleIds)
+    }
+
+    const timestamp = deps.now()
+    const generated = await mutateStore(store => {
+      const chat = requireChat(store, chatId)
+      const existingRoles = getChatRoles(store, chat)
+      const { roleIdsByKey, createdRoleIds, reusedRoleIds } = materializeAutoPlanRoles(store, chat, existingRoles, plan, deps.newId, timestamp)
+      const flow = buildFlowFromAutoPlan(chat, flowId ?? deps.newId('flow'), plan, roleIdsByKey, timestamp)
+      return { flow, createdRoleIds, reusedRoleIds }
+    })
+    await deps.broadcastStoreUpdated(generated.store)
+    return { ok: true, ...generated.result, store: generated.store }
+  }
+
   return [
     { type: 'GROUP_ORCHESTRATION_FLOW_SAVE', handler: handleFlowSave },
     { type: 'GROUP_ORCHESTRATION_FLOW_DELETE', handler: handleFlowDelete },
+    { type: 'GROUP_ORCHESTRATION_AUTO_GENERATE', handler: handleAutoGenerate },
     {
       type: 'GROUP_ORCHESTRATION_RUN',
       handler: async message => {
@@ -84,6 +142,100 @@ export function createOrchestrationHandlers(deps: OrchestrationHandlersDependenc
       handler: async message => ({ ok: true, ...(await retryOrchestrationReview(deps, requireString(message.chatId, '缺少群聊 ID'))) }),
     },
   ]
+}
+
+function materializeAutoPlanRoles(
+  store: OpenTeamStore,
+  chat: GroupChat,
+  existingRoles: GroupRole[],
+  plan: AutoOrchestrationPlan,
+  newId: (prefix: string) => string,
+  timestamp: number,
+): { roleIdsByKey: Map<string, string>; createdRoleIds: string[]; reusedRoleIds: string[] } {
+  const roleIdsByKey = new Map<string, string>()
+  const createdRoleIds: string[] = []
+  const reusedRoleIds: string[] = []
+  for (const rolePlan of plan.roles) {
+    const reusable = rolePlan.reuseRoleId ? store.rolesById[rolePlan.reuseRoleId] : findReusableGeneratedRole(existingRoles, rolePlan.name, rolePlan.preferredSite, store.settings.defaultChatSite)
+    if (reusable && reusable.chatId === chat.id) {
+      roleIdsByKey.set(rolePlan.key, reusable.id)
+      reusedRoleIds.push(reusable.id)
+      continue
+    }
+    const role = createGroupRole(store, {
+      chatId: chat.id,
+      name: rolePlan.name,
+      description: rolePlan.description,
+      systemPrompt: rolePlan.systemPrompt,
+      modelSource: 'site',
+      chatSite: 'deepseek',
+    }, newId('role'), timestamp)
+    roleIdsByKey.set(rolePlan.key, role.id)
+    createdRoleIds.push(role.id)
+  }
+  return { roleIdsByKey, createdRoleIds, reusedRoleIds: [...new Set(reusedRoleIds)] }
+}
+
+function findReusableGeneratedRole(existingRoles: GroupRole[], name: string, preferredSite: ChatSite, defaultChatSite: ChatSite): GroupRole | undefined {
+  const normalizedName = name.trim().toLowerCase()
+  return existingRoles.find(role => {
+    const site = role.modelSource === 'external' ? undefined : role.chatSite ?? defaultChatSite
+    return role.name.trim().toLowerCase() === normalizedName && site === preferredSite
+  })
+}
+
+function buildFlowFromAutoPlan(
+  chat: GroupChat,
+  flowId: string,
+  plan: AutoOrchestrationPlan,
+  roleIdsByKey: Map<string, string>,
+  timestamp: number,
+): OrchestrationFlow {
+  const stageIdByNodeId = new Map(plan.nodes.map(node => [node.id, `stage-${node.id}`]))
+  const stages: OrchestrationStage[] = plan.nodes.map(node => {
+    const roleId = roleIdsByKey.get(node.roleKey)
+    if (!roleId) throw new Error(`自动编排节点缺少人员：${node.roleKey}`)
+    const base = {
+      id: stageIdByNodeId.get(node.id) ?? `stage-${node.id}`,
+      kind: node.kind === 'review' ? 'review' as const : 'roles' as const,
+      name: node.title,
+      description: node.instruction,
+      roleIds: [roleId],
+    }
+    if (node.kind !== 'review') return base
+    if (!node.review) throw new Error(`自动编排审核节点缺少审核配置：${node.id}`)
+    return {
+      ...base,
+      review: {
+        reviewerRoleIds: [roleId],
+        instructions: node.review.criteria,
+        maxAttempts: node.review.maxAttempts,
+        onMaxAttempts: node.review.onMaxAttempts,
+      },
+    }
+  })
+  const edges: OrchestrationGraphSnapshot['edges'] = plan.edges.map(edge => {
+    const sourceStageId = stageIdByNodeId.get(edge.from)
+    const targetStageId = stageIdByNodeId.get(edge.to)
+    if (!sourceStageId || !targetStageId) throw new Error(`自动编排连线无效：${edge.from} -> ${edge.to}`)
+    return {
+      sourceStageId,
+      targetStageId,
+      ...(edge.branch ? { sourcePort: edge.branch } : {}),
+    }
+  })
+  return {
+    id: flowId,
+    chatId: chat.id,
+    name: plan.flowName || `${chat.name} 自动编排`,
+    description: undefined,
+    stages,
+    graph: { stageNodes: stages, edges },
+    maxNodeExecutions: plan.maxNodeExecutions,
+    maxRounds: plan.maxNodeExecutions,
+    createdAt: timestamp,
+    updatedAt: timestamp,
+  }
 }
 
 async function persistFlowDraft(deps: OrchestrationHandlersDependencies, flow: OrchestrationFlow) {

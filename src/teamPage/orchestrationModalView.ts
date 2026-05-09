@@ -8,6 +8,7 @@ export interface OrchestrationModalDependencies {
   orchestrationModalEl: HTMLElement
   closeOrchestrationEl: HTMLButtonElement
   orchestrationTaskEl: HTMLTextAreaElement
+  autoOrchestrationEl: HTMLButtonElement
   orchestrationPeopleListEl: HTMLElement
   arrangeOrchestrationEl: HTMLButtonElement
   orchestrationCanvasEl: HTMLElement
@@ -18,9 +19,11 @@ export interface OrchestrationModalDependencies {
   saveOrchestrationEl: HTMLButtonElement
   runOrchestrationEl: HTMLButtonElement
   getStore(): OpenTeamStore
+  applyStore(store: OpenTeamStore): void
   getCurrentChat(): GroupChat | undefined
   getCurrentRoles(): GroupRole[]
   reconnectRolesForSend(chat: GroupChat, roles: GroupRole[]): Promise<void>
+  sendRuntimeMessage<T>(type: string, payload?: Record<string, unknown>): Promise<{ ok?: boolean; error?: string; store?: OpenTeamStore; flow?: OrchestrationFlow; createdRoleIds?: string[]; reusedRoleIds?: string[]; data?: T }>
   runCommand(type: string, payload?: Record<string, unknown>): Promise<void>
   showError(message: string): void
   showSuccess(message: string): void
@@ -48,6 +51,7 @@ export function createOrchestrationModalView(deps: OrchestrationModalDependencie
   let mounted = false
   let saving = false
   let running = false
+  let autoGenerating = false
 
   function emptyDraft(): FlowDraft {
     return { task: '', stages: [], graphEdges: [], maxNodeExecutions: DEFAULT_ORCHESTRATION_MAX_NODE_EXECUTIONS }
@@ -394,9 +398,52 @@ export function createOrchestrationModalView(deps: OrchestrationModalDependencie
     }
   }
 
+  async function autoGenerate(): Promise<void> {
+    if (autoGenerating || saving || running) return
+    const chat = deps.getCurrentChat()
+    const task = deps.orchestrationTaskEl.value.trim()
+    if (!chat) return
+    if (!task) {
+      deps.showError('请输入编排任务')
+      return
+    }
+    if (draft.stages.length > 0 && !confirm('自动编排会覆盖当前画布草稿，是否继续？')) return
+    autoGenerating = true
+    updateActionButtons()
+    try {
+      const response = await deps.sendRuntimeMessage('GROUP_ORCHESTRATION_AUTO_GENERATE', { chatId: chat.id, task, flowId: draft.flowId })
+      if (response.ok === false) throw new Error(response.error || '自动编排失败')
+      if (response.store) deps.applyStore(response.store)
+      const flow = response.flow
+      if (!flow) throw new Error('自动编排没有返回流程')
+      applyGeneratedFlow(flow)
+      deps.showSuccess(autoGenerateSuccessMessage(response.createdRoleIds?.length ?? 0, response.reusedRoleIds?.length ?? 0))
+    } finally {
+      autoGenerating = false
+      updateActionButtons()
+    }
+  }
+
   function updateActionButtons(): void {
-    deps.saveOrchestrationEl.disabled = saving || running
-    deps.runOrchestrationEl.disabled = saving || running
+    deps.autoOrchestrationEl.disabled = autoGenerating || saving || running
+    deps.autoOrchestrationEl.textContent = autoGenerating ? '生成中...' : '自动编排'
+    deps.saveOrchestrationEl.disabled = saving || running || autoGenerating
+    deps.runOrchestrationEl.disabled = saving || running || autoGenerating
+  }
+
+  function applyGeneratedFlow(flow: OrchestrationFlow): void {
+    const stages = cloneStages(flow.graph?.stageNodes?.length ? flow.graph.stageNodes : flow.stages)
+    const arranged = arrangeOrchestrationGraph(stages, flow.graph?.edges ? cloneGraphEdges(flow.graph.edges) : sequentialGraphEdges(stages))
+    draft = {
+      flowId: flow.id,
+      task: deps.orchestrationTaskEl.value.trim(),
+      stages: arranged.stages,
+      graphEdges: arranged.edges,
+      maxNodeExecutions: clampMaxNodeExecutions(flow.maxNodeExecutions ?? DEFAULT_ORCHESTRATION_MAX_NODE_EXECUTIONS),
+      selectedStageId: undefined,
+    }
+    deps.orchestrationMaxRoundsEl.value = String(draft.maxNodeExecutions)
+    render()
   }
 
   function buildFlow(chat: GroupChat): OrchestrationFlow {
@@ -480,12 +527,19 @@ export function createOrchestrationModalView(deps: OrchestrationModalDependencie
     deps.openOrchestrationEl.addEventListener('click', open)
     deps.closeOrchestrationEl.addEventListener('click', close)
     deps.arrangeOrchestrationEl.addEventListener('click', arrangeCanvas)
+    deps.autoOrchestrationEl.addEventListener('click', () => autoGenerate().catch(error => deps.showError(error instanceof Error ? error.message : String(error))))
     deps.orchestrationMaxRoundsEl.addEventListener('input', render)
     deps.saveOrchestrationEl.addEventListener('click', () => save().catch(error => deps.showError(error instanceof Error ? error.message : String(error))))
     deps.runOrchestrationEl.addEventListener('click', () => run().catch(error => deps.showError(error instanceof Error ? error.message : String(error))))
   }
 
   return { close, render, registerOrchestrationEvents }
+}
+
+function autoGenerateSuccessMessage(createdCount: number, reusedCount: number): string {
+  if (createdCount > 0 && reusedCount > 0) return `已自动生成编排草稿，复用 ${reusedCount} 个成员，新增 ${createdCount} 个 DeepSeek 人员`
+  if (createdCount > 0) return `已自动生成编排草稿，新增 ${createdCount} 个 DeepSeek 人员`
+  return '已自动生成编排草稿，可继续调整后保存或运行'
 }
 
 function cloneStages(stages: OrchestrationStage[]): OrchestrationStage[] {
