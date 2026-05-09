@@ -39,13 +39,14 @@ function baseFixture(status: OrchestrationRun['status'] = 'running') {
     createdAt: now,
     updatedAt: now,
   }
-  const run: OrchestrationRun = {
-    id: 'run-1',
-    chatId: chat.id,
-    flowId: flow.id,
-    status,
-    currentRound: 1,
-    maxRounds: 2,
+    const run: OrchestrationRun = {
+      id: 'run-1',
+      chatId: chat.id,
+      flowId: flow.id,
+      status,
+      currentRound: 1,
+      maxNodeExecutions: 50,
+      maxRounds: 2,
     stageRuns: [
       {
         stageId: 'stage-1',
@@ -89,7 +90,7 @@ describe('orchestration status view', () => {
 
     const node = view.renderOrchestrationStatus()
 
-    expect(node?.textContent).toContain('编排运行中 · 第 1 轮 · 第 1 步 / 共 3 步')
+    expect(node?.textContent).toContain('编排运行中 · 已执行 1 / 50 个节点 · 第 1 / 3 个节点')
     expect(node?.textContent).toContain('产品（ChatGPT）')
     expect(node?.textContent).toContain('产品（DeepSeek）、产品（ChatGPT）')
     expect(node?.textContent).not.toContain('阶段')
@@ -150,8 +151,9 @@ describe('orchestration status view', () => {
       showError: vi.fn(),
     }).renderOrchestrationStatus()
 
-    expect(node?.textContent).toContain('编排出错 · 第 2 轮 · 第 3 步 / 共 3 步')
+    expect(node?.textContent).toContain('编排出错 · 已执行 6 / 50 个节点 · 第 3 / 3 个节点')
     expect(node?.textContent).not.toContain('6 / 3 步')
+    expect(node?.textContent).not.toContain('第 2 轮')
   })
 
   it('dispatches stop, retry node, skip node, and retry review actions when applicable', async () => {

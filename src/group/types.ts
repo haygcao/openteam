@@ -74,6 +74,9 @@ export interface ExternalChatMemory {
   updatedAt: number
 }
 
+export const DEFAULT_ORCHESTRATION_MAX_NODE_EXECUTIONS = 50
+export const MAX_ORCHESTRATION_MAX_NODE_EXECUTIONS = 200
+export const DEFAULT_ORCHESTRATION_REVIEW_MAX_ATTEMPTS = 3
 export const DEFAULT_ORCHESTRATION_MAX_ROUNDS = 1
 export const MAX_ORCHESTRATION_MAX_ROUNDS = 50
 
@@ -81,11 +84,14 @@ export type OrchestrationStageKind = 'roles' | 'review'
 export type OrchestrationRunStatus = 'pending' | 'running' | 'completed' | 'stopped' | 'error'
 export type OrchestrationStepStatus = 'pending' | 'running' | 'completed' | 'skipped' | 'error'
 export type ReviewDecision = 'pass' | 'fail'
+export type ReviewMaxAttemptsAction = 'stop' | 'continue'
 
 export interface OrchestrationReviewConfig {
   reviewerRoleIds: string[]
   approvalThreshold?: number
   instructions?: string
+  maxAttempts?: number
+  onMaxAttempts?: ReviewMaxAttemptsAction
 }
 
 export interface OrchestrationStage {
@@ -128,6 +134,7 @@ export interface OrchestrationFlow {
   description?: string
   stages: OrchestrationStage[]
   graph?: OrchestrationGraphSnapshot
+  maxNodeExecutions?: number
   maxRounds: number
   createdAt: number
   updatedAt: number
@@ -173,6 +180,7 @@ export interface OrchestrationRun {
   flowId: string
   status: OrchestrationRunStatus
   currentRound: number
+  maxNodeExecutions?: number
   maxRounds: number
   stageRuns: OrchestrationStageRun[]
   createdAt: number

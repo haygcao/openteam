@@ -221,7 +221,7 @@ describe('orchestration runtime', () => {
     expect(run.stageRuns.map(stageRun => stageRun.stageId)).toEqual(['stage-a', 'stage-b', 'stage-c'])
   })
 
-  it('runs role-only flows for every configured round', async () => {
+  it('completes role-only flows at the last node instead of repeating from the root', async () => {
     const store = makeStore(['role-1'])
     store.orchestrationFlowsById['flow-1'] = makeFlow('chat-1', [
       { id: 'stage-1', kind: 'roles', name: 'Build', roleIds: ['role-1'] },
@@ -233,15 +233,11 @@ describe('orchestration runtime', () => {
     expect(promptCalls(harness.tabsSendMessage)).toHaveLength(1)
     await harness.invoke({ type: 'TEAM_ROLE_REPLY', chatId: 'chat-1', roleId: 'role-1', messageId: firstPromptMessageId(harness.tabsSendMessage), content: 'round one' })
 
-    expect(promptCalls(harness.tabsSendMessage)).toHaveLength(2)
-    const midStore = await harness.getStore()
-    expect(midStore.orchestrationRunsById[started.run.id]).toMatchObject({ status: 'running', currentRound: 2, maxRounds: 2 })
-
-    await harness.invoke({ type: 'TEAM_ROLE_REPLY', chatId: 'chat-1', roleId: 'role-1', messageId: lastPromptMessageId(harness.tabsSendMessage), content: 'round two' })
     const finalStore = await harness.getStore()
     const run = finalStore.orchestrationRunsById[started.run.id]
     expect(run.status).toBe('completed')
-    expect(run.stageRuns.map(stageRun => stageRun.round)).toEqual([1, 2])
+    expect(promptCalls(harness.tabsSendMessage)).toHaveLength(1)
+    expect(run.stageRuns.map(stageRun => stageRun.stageId)).toEqual(['stage-1'])
   })
 
   it('stops after a review pass even when more rounds are allowed', async () => {
@@ -310,8 +306,119 @@ describe('orchestration runtime', () => {
     expect(calls[3][0]).toBe(102)
     const midStore = await harness.getStore()
     const run = midStore.orchestrationRunsById[started.run.id]
-    expect(run.currentRound).toBe(2)
-    expect(run.stageRuns.map(stageRun => `${stageRun.round}:${stageRun.stageId}`)).toEqual(['1:stage-a', '1:stage-b', '1:review-1', '2:stage-b'])
+    expect(run.currentRound).toBe(1)
+    expect(run.stageRuns.map(stageRun => stageRun.stageId)).toEqual(['stage-a', 'stage-b', 'review-1', 'stage-b'])
+  })
+
+  it('stops when a review reaches its max attempts and the review is configured to stop', async () => {
+    const store = makeStore(['worker', 'reviewer'])
+    const stages: OrchestrationFlow['stages'] = [
+      { id: 'stage-1', kind: 'roles', name: 'Build', roleIds: ['worker'] },
+      { id: 'review-1', kind: 'review', name: 'Review', roleIds: ['reviewer'], review: { reviewerRoleIds: ['reviewer'], instructions: 'Check output', maxAttempts: 1, onMaxAttempts: 'stop' } },
+    ]
+    store.orchestrationFlowsById['flow-1'] = {
+      ...makeFlow('chat-1', stages, 10),
+      graph: {
+        stageNodes: stages,
+        edges: [
+          { sourceStageId: 'stage-1', targetStageId: 'review-1' },
+          { sourceStageId: 'review-1', targetStageId: 'stage-1', sourcePort: 'fail' },
+        ],
+      },
+    }
+    const harness = await setupBackground(store)
+    await harness.invoke({ type: 'TEAM_FRAME_ROLE_READY', chatId: 'chat-1', roleId: 'worker' }, { tab: { id: 101 } as chrome.tabs.Tab, frameId: 1, url: 'https://gemini.google.com/app/worker' })
+    await harness.invoke({ type: 'TEAM_FRAME_ROLE_READY', chatId: 'chat-1', roleId: 'reviewer' }, { tab: { id: 102 } as chrome.tabs.Tab, frameId: 2, url: 'https://gemini.google.com/app/reviewer' })
+
+    const started = await harness.invoke({ type: 'GROUP_ORCHESTRATION_RUN', chatId: 'chat-1', flowId: 'flow-1', task: 'Ship the plan' }) as { run: { id: string } }
+    await harness.invoke({ type: 'TEAM_ROLE_REPLY', chatId: 'chat-1', roleId: 'worker', messageId: lastPromptMessageId(harness.tabsSendMessage), content: 'draft' })
+    await harness.invoke({
+      type: 'TEAM_ROLE_REPLY',
+      chatId: 'chat-1',
+      roleId: 'reviewer',
+      messageId: lastPromptMessageId(harness.tabsSendMessage),
+      content: '{"decision":"fail","reason":"Needs work.","failedCriteria":["risk"],"nextRoundInstruction":"Revise."}',
+    })
+
+    const finalStore = await harness.getStore()
+    const run = finalStore.orchestrationRunsById[started.run.id]
+    expect(run.status).toBe('error')
+    expect(run.error).toContain('已达到最大审核次数')
+    expect(run.stageRuns.map(stageRun => stageRun.stageId)).toEqual(['stage-1', 'review-1'])
+    expect(promptCalls(harness.tabsSendMessage)).toHaveLength(2)
+  })
+
+  it('continues through pass targets after a review reaches max attempts when configured to continue', async () => {
+    const store = makeStore(['worker', 'reviewer', 'final'])
+    const stages: OrchestrationFlow['stages'] = [
+      { id: 'stage-1', kind: 'roles', name: 'Build', roleIds: ['worker'] },
+      { id: 'review-1', kind: 'review', name: 'Review', roleIds: ['reviewer'], review: { reviewerRoleIds: ['reviewer'], instructions: 'Check output', maxAttempts: 1, onMaxAttempts: 'continue' } },
+      { id: 'stage-final', kind: 'roles', name: 'Final', roleIds: ['final'] },
+    ]
+    store.orchestrationFlowsById['flow-1'] = {
+      ...makeFlow('chat-1', stages, 10),
+      graph: {
+        stageNodes: stages,
+        edges: [
+          { sourceStageId: 'stage-1', targetStageId: 'review-1' },
+          { sourceStageId: 'review-1', targetStageId: 'stage-1', sourcePort: 'fail' },
+          { sourceStageId: 'review-1', targetStageId: 'stage-final', sourcePort: 'pass' },
+        ],
+      },
+    }
+    const harness = await setupBackground(store)
+    await harness.invoke({ type: 'TEAM_FRAME_ROLE_READY', chatId: 'chat-1', roleId: 'worker' }, { tab: { id: 101 } as chrome.tabs.Tab, frameId: 1, url: 'https://gemini.google.com/app/worker' })
+    await harness.invoke({ type: 'TEAM_FRAME_ROLE_READY', chatId: 'chat-1', roleId: 'reviewer' }, { tab: { id: 102 } as chrome.tabs.Tab, frameId: 2, url: 'https://gemini.google.com/app/reviewer' })
+    await harness.invoke({ type: 'TEAM_FRAME_ROLE_READY', chatId: 'chat-1', roleId: 'final' }, { tab: { id: 103 } as chrome.tabs.Tab, frameId: 3, url: 'https://gemini.google.com/app/final' })
+
+    const started = await harness.invoke({ type: 'GROUP_ORCHESTRATION_RUN', chatId: 'chat-1', flowId: 'flow-1', task: 'Ship the plan' }) as { run: { id: string } }
+    await harness.invoke({ type: 'TEAM_ROLE_REPLY', chatId: 'chat-1', roleId: 'worker', messageId: lastPromptMessageId(harness.tabsSendMessage), content: 'draft' })
+    await harness.invoke({
+      type: 'TEAM_ROLE_REPLY',
+      chatId: 'chat-1',
+      roleId: 'reviewer',
+      messageId: lastPromptMessageId(harness.tabsSendMessage),
+      content: '{"decision":"fail","reason":"Risk accepted.","failedCriteria":["risk"],"nextRoundInstruction":"继续收尾。"}',
+    })
+
+    const calls = promptCalls(harness.tabsSendMessage)
+    expect(calls).toHaveLength(3)
+    expect(calls[2][0]).toBe(103)
+    const midStore = await harness.getStore()
+    expect(midStore.orchestrationRunsById[started.run.id].stageRuns.map(stageRun => stageRun.stageId)).toEqual(['stage-1', 'review-1', 'stage-final'])
+  })
+
+  it('stops when the total node execution limit is reached', async () => {
+    const store = makeStore(['role-a', 'role-b'])
+    const stages: OrchestrationFlow['stages'] = [
+      { id: 'stage-a', kind: 'roles', name: 'A', roleIds: ['role-a'] },
+      { id: 'stage-b', kind: 'roles', name: 'B', roleIds: ['role-b'] },
+    ]
+    store.orchestrationFlowsById['flow-1'] = {
+      ...makeFlow('chat-1', stages, 2),
+      maxNodeExecutions: 2,
+      graph: {
+        stageNodes: stages,
+        edges: [
+          { sourceStageId: 'stage-a', targetStageId: 'stage-b' },
+          { sourceStageId: 'stage-b', targetStageId: 'stage-a' },
+        ],
+      },
+    }
+    const harness = await setupBackground(store)
+    await harness.invoke({ type: 'TEAM_FRAME_ROLE_READY', chatId: 'chat-1', roleId: 'role-a' }, { tab: { id: 101 } as chrome.tabs.Tab, frameId: 1, url: 'https://gemini.google.com/app/a' })
+    await harness.invoke({ type: 'TEAM_FRAME_ROLE_READY', chatId: 'chat-1', roleId: 'role-b' }, { tab: { id: 102 } as chrome.tabs.Tab, frameId: 2, url: 'https://gemini.google.com/app/b' })
+
+    const started = await harness.invoke({ type: 'GROUP_ORCHESTRATION_RUN', chatId: 'chat-1', flowId: 'flow-1', task: 'Ship the plan' }) as { run: { id: string } }
+    await harness.invoke({ type: 'TEAM_ROLE_REPLY', chatId: 'chat-1', roleId: 'role-a', messageId: lastPromptMessageId(harness.tabsSendMessage), content: 'a done' })
+    await harness.invoke({ type: 'TEAM_ROLE_REPLY', chatId: 'chat-1', roleId: 'role-b', messageId: lastPromptMessageId(harness.tabsSendMessage), content: 'b done' })
+
+    const finalStore = await harness.getStore()
+    const run = finalStore.orchestrationRunsById[started.run.id]
+    expect(run.status).toBe('error')
+    expect(run.error).toContain('最大节点执行数')
+    expect(run.stageRuns.map(stageRun => stageRun.stageId)).toEqual(['stage-a', 'stage-b'])
+    expect(promptCalls(harness.tabsSendMessage)).toHaveLength(2)
   })
 
   it('does not start a review pass target before the review decision even when legacy review edges have no source port', async () => {

@@ -156,7 +156,7 @@ describe('orchestration modal view', () => {
 
     expect(harness.refs.orchestrationModalEl.hidden).toBe(false)
     expect(harness.refs.orchestrationHintEl.hidden).toBe(false)
-    expect(harness.refs.orchestrationMaxRoundsEl.value).toBe('1')
+    expect(harness.refs.orchestrationMaxRoundsEl.value).toBe('50')
     expect(harness.refs.orchestrationPeopleListEl.textContent).not.toContain('新阶段')
     expect(harness.refs.orchestrationPeopleListEl.textContent).not.toContain('并行加入')
     expect(harness.refs.orchestrationPeopleListEl.textContent).not.toContain('设为审核')
@@ -319,6 +319,7 @@ describe('orchestration modal view', () => {
         ],
         edges: [{ sourceStageId: 'stage-saved-1', targetStageId: 'stage-saved-2' }],
       },
+      maxNodeExecutions: 8,
       maxRounds: 3,
       createdAt: 1,
       updatedAt: 1,
@@ -336,7 +337,7 @@ describe('orchestration modal view', () => {
     MockGraph.latest().selectNode('stage-saved-1')
     expect((harness.refs.orchestrationStageSettingsEl.querySelector('input') as HTMLInputElement).value).toBe('旧阶段 1')
     expect((harness.refs.orchestrationStageSettingsEl.querySelector('textarea') as HTMLTextAreaElement).value).toBe('保存过的节点说明')
-    expect(harness.refs.orchestrationMaxRoundsEl.value).toBe('3')
+    expect(harness.refs.orchestrationMaxRoundsEl.value).toBe('8')
     expect(harness.refs.orchestrationTaskEl.value).toBe('保存过的任务')
     harness.refs.orchestrationTaskEl.value = '继续执行'
     harness.refs.runOrchestrationEl.click()
@@ -347,24 +348,24 @@ describe('orchestration modal view', () => {
     expect(runPayload.flow?.graph?.edges).toEqual([{ sourceStageId: 'stage-saved-1', targetStageId: 'stage-saved-2' }])
   })
 
-  it('validates max rounds and saves a stage draft through GROUP_ORCHESTRATION_FLOW_SAVE', async () => {
+  it('validates max node executions and saves a stage draft through GROUP_ORCHESTRATION_FLOW_SAVE', async () => {
     const harness = createHarness()
     const view = createView(harness)
     view.registerOrchestrationEvents()
     harness.refs.openOrchestrationEl.click()
     dropRole(harness, 'role-1')
     harness.refs.orchestrationTaskEl.value = '保存这次任务'
-    harness.refs.orchestrationMaxRoundsEl.value = '51'
+    harness.refs.orchestrationMaxRoundsEl.value = '201'
 
     harness.refs.saveOrchestrationEl.click()
     await Promise.resolve()
 
-    expect(harness.errors).toContain('最大轮数需在 1-50 之间')
-    harness.refs.orchestrationMaxRoundsEl.value = '2'
+    expect(harness.errors).toContain('最大节点执行数需在 1-200 之间')
+    harness.refs.orchestrationMaxRoundsEl.value = '12'
     harness.refs.saveOrchestrationEl.click()
     await Promise.resolve()
 
-    expect(harness.runCommand).toHaveBeenCalledWith('GROUP_ORCHESTRATION_FLOW_SAVE', expect.objectContaining({ chatId: 'chat-1', flow: expect.objectContaining({ description: '保存这次任务', maxRounds: 2 }) }))
+    expect(harness.runCommand).toHaveBeenCalledWith('GROUP_ORCHESTRATION_FLOW_SAVE', expect.objectContaining({ chatId: 'chat-1', flow: expect.objectContaining({ description: '保存这次任务', maxNodeExecutions: 12, maxRounds: 12 }) }))
   })
 
   it('validates run task and review settings before GROUP_ORCHESTRATION_RUN', async () => {
@@ -380,7 +381,12 @@ describe('orchestration modal view', () => {
     typeSelect.dispatchEvent(new Event('change', { bubbles: true }))
     expect(harness.refs.orchestrationStageSettingsEl.querySelector('.stage-role-chip button')).toBeNull()
     expect(harness.refs.orchestrationReviewSettingsEl.textContent).not.toContain('审核人员')
-    expect(harness.refs.orchestrationReviewSettingsEl.querySelector('select')).toBeNull()
+    expect(harness.refs.orchestrationReviewSettingsEl.textContent).toContain('最大审核次数')
+    expect(harness.refs.orchestrationReviewSettingsEl.textContent).toContain('达到上限后')
+    const attempts = harness.refs.orchestrationReviewSettingsEl.querySelector('input[type="number"]') as HTMLInputElement
+    const maxAction = harness.refs.orchestrationReviewSettingsEl.querySelector('select') as HTMLSelectElement
+    expect(attempts.value).toBe('3')
+    expect(maxAction.value).toBe('stop')
 
     harness.refs.runOrchestrationEl.click()
     await Promise.resolve()
@@ -394,10 +400,16 @@ describe('orchestration modal view', () => {
     const criteria = harness.refs.orchestrationReviewSettingsEl.querySelector('textarea') as HTMLTextAreaElement
     criteria.value = '必须包含结论'
     criteria.dispatchEvent(new Event('input', { bubbles: true }))
+    attempts.value = '2'
+    attempts.dispatchEvent(new Event('input', { bubbles: true }))
+    maxAction.value = 'continue'
+    maxAction.dispatchEvent(new Event('change', { bubbles: true }))
     harness.refs.runOrchestrationEl.click()
     await flushAsync()
 
     expect(harness.runCommand).toHaveBeenCalledWith('GROUP_ORCHESTRATION_RUN', expect.objectContaining({ chatId: 'chat-1', task: '完成方案评审', flow: expect.any(Object) }))
+    const runPayload = harness.runCommand.mock.calls.find(call => call[0] === 'GROUP_ORCHESTRATION_RUN')?.[1] as { flow?: OrchestrationFlow }
+    expect(runPayload.flow?.stages[0].review).toMatchObject({ maxAttempts: 2, onMaxAttempts: 'continue' })
   })
 
   it('recovers stage roles before running an orchestration', async () => {

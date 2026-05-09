@@ -1829,7 +1829,7 @@ describe('team page messages view boundary', () => {
     expect(messagesEl.querySelector('.orchestration-review-summary')?.textContent).toContain('决策：不通过')
     expect(messagesEl.querySelector('.orchestration-review-summary')?.textContent).toContain('原因：还需要补充测试')
     expect(messagesEl.querySelector('.orchestration-review-summary')?.textContent).toContain('未通过：测试不足')
-    expect(messagesEl.querySelector('.orchestration-review-summary')?.textContent).toContain('下一轮：下一轮补齐测试')
+    expect(messagesEl.querySelector('.orchestration-review-summary')?.textContent).toContain('重试说明：下一轮补齐测试')
   })
 
   it('invalidates cached message nodes when orchestration metadata changes', () => {

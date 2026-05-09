@@ -1,5 +1,5 @@
 import type { ChatSite, ExternalModelConfig, GroupChat, GroupRole, OpenTeamStore, OrchestrationFlow, OrchestrationGraphSnapshot, OrchestrationStage } from '../group/types'
-import { DEFAULT_ORCHESTRATION_MAX_ROUNDS, MAX_ORCHESTRATION_MAX_ROUNDS } from '../group/types'
+import { DEFAULT_ORCHESTRATION_MAX_NODE_EXECUTIONS, DEFAULT_ORCHESTRATION_REVIEW_MAX_ATTEMPTS, MAX_ORCHESTRATION_MAX_NODE_EXECUTIONS } from '../group/types'
 import { arrangeOrchestrationGraph, createOrchestrationCanvas, type LoadX6, type OrchestrationCanvas } from './orchestrationCanvas'
 
 export interface OrchestrationModalDependencies {
@@ -37,7 +37,7 @@ interface FlowDraft {
   task: string
   stages: OrchestrationStage[]
   graphEdges: OrchestrationGraphSnapshot['edges']
-  maxRounds: number
+  maxNodeExecutions: number
   selectedStageId?: string
 }
 
@@ -49,7 +49,7 @@ export function createOrchestrationModalView(deps: OrchestrationModalDependencie
   let running = false
 
   function emptyDraft(): FlowDraft {
-    return { task: '', stages: [], graphEdges: [], maxRounds: DEFAULT_ORCHESTRATION_MAX_ROUNDS }
+    return { task: '', stages: [], graphEdges: [], maxNodeExecutions: DEFAULT_ORCHESTRATION_MAX_NODE_EXECUTIONS }
   }
 
   function open(): void {
@@ -61,8 +61,8 @@ export function createOrchestrationModalView(deps: OrchestrationModalDependencie
     loadDraft(chat)
     deps.orchestrationModalEl.hidden = false
     deps.orchestrationTaskEl.value = draft.task
-    deps.orchestrationMaxRoundsEl.value = String(draft.maxRounds)
-    deps.orchestrationMaxRoundsEl.max = String(MAX_ORCHESTRATION_MAX_ROUNDS)
+    deps.orchestrationMaxRoundsEl.value = String(draft.maxNodeExecutions)
+    deps.orchestrationMaxRoundsEl.max = String(MAX_ORCHESTRATION_MAX_NODE_EXECUTIONS)
     mountCanvas()
     render()
     deps.orchestrationTaskEl.focus()
@@ -90,7 +90,7 @@ export function createOrchestrationModalView(deps: OrchestrationModalDependencie
       task: flow.description?.trim() ?? '',
       stages,
       graphEdges: flow.graph?.edges ? cloneGraphEdges(flow.graph.edges) : sequentialGraphEdges(stages),
-      maxRounds: clampMaxRounds(flow.maxRounds),
+      maxNodeExecutions: clampMaxNodeExecutions(flow.maxNodeExecutions ?? DEFAULT_ORCHESTRATION_MAX_NODE_EXECUTIONS),
       selectedStageId: undefined,
     }
   }
@@ -121,7 +121,7 @@ export function createOrchestrationModalView(deps: OrchestrationModalDependencie
 
   function render(): void {
     if (deps.orchestrationModalEl.hidden) return
-    draft.maxRounds = clampMaxRounds(Number(deps.orchestrationMaxRoundsEl.value || DEFAULT_ORCHESTRATION_MAX_ROUNDS))
+    draft.maxNodeExecutions = clampMaxNodeExecutions(Number(deps.orchestrationMaxRoundsEl.value || DEFAULT_ORCHESTRATION_MAX_NODE_EXECUTIONS))
     deps.orchestrationHintEl.hidden = draft.stages.length > 0
     deps.orchestrationHintEl.textContent = '把人员拖到画布生成节点，再从节点端口拖线编排执行关系。'
     renderPeopleList()
@@ -255,18 +255,40 @@ export function createOrchestrationModalView(deps: OrchestrationModalDependencie
     criteria.value = stage.review?.instructions ?? ''
     criteria.placeholder = '例如：答案需要覆盖风险、方案和下一步行动。未满足时返回 fail。'
     criteria.addEventListener('input', () => {
-      stage.review = { reviewerRoleIds: stage.roleIds, instructions: criteria.value }
+      stage.review = normalizedReviewConfig(stage, { instructions: criteria.value })
     })
     criteriaField.append(criteria)
+    const attemptsField = document.createElement('label')
+    attemptsField.className = 'field'
+    attemptsField.textContent = '最大审核次数'
+    const attemptsInput = document.createElement('input')
+    attemptsInput.type = 'number'
+    attemptsInput.min = '1'
+    attemptsInput.max = '50'
+    attemptsInput.value = String(stage.review?.maxAttempts ?? DEFAULT_ORCHESTRATION_REVIEW_MAX_ATTEMPTS)
+    attemptsInput.addEventListener('input', () => {
+      stage.review = normalizedReviewConfig(stage, { maxAttempts: clampReviewAttempts(Number(attemptsInput.value || DEFAULT_ORCHESTRATION_REVIEW_MAX_ATTEMPTS)) })
+    })
+    attemptsField.append(attemptsInput)
+    const actionField = document.createElement('label')
+    actionField.className = 'field'
+    actionField.textContent = '达到上限后'
+    const actionSelect = document.createElement('select')
+    actionSelect.append(new Option('停止流程', 'stop'), new Option('继续往下走', 'continue'))
+    actionSelect.value = stage.review?.onMaxAttempts ?? 'stop'
+    actionSelect.addEventListener('change', () => {
+      stage.review = normalizedReviewConfig(stage, { onMaxAttempts: actionSelect.value === 'continue' ? 'continue' : 'stop' })
+    })
+    actionField.append(actionSelect)
     const preview = document.createElement('div')
     preview.className = 'orchestration-json-preview'
     const previewTitle = document.createElement('span')
     previewTitle.className = 'tiny'
     previewTitle.textContent = '审核返回 JSON 预览'
     const schema = document.createElement('pre')
-    schema.textContent = '{\n  "decision": "pass | fail",\n  "reason": "审核说明",\n  "failedCriteria": [],\n  "nextRoundInstruction": "不通过时的补充任务"\n}'
+    schema.textContent = '{\n  "decision": "pass | fail",\n  "reason": "审核说明",\n  "failedCriteria": [],\n  "nextRoundInstruction": "不通过时的重试说明"\n}'
     preview.append(previewTitle, schema)
-    deps.orchestrationReviewSettingsEl.append(intro, criteriaField, preview)
+    deps.orchestrationReviewSettingsEl.append(intro, criteriaField, attemptsField, actionField, preview)
   }
 
   function settingsNote(message: string): HTMLElement {
@@ -303,7 +325,7 @@ export function createOrchestrationModalView(deps: OrchestrationModalDependencie
     if (kind === 'review') {
       stage.name = stage.name.trim() || '审核'
       stage.roleIds = stage.roleIds.slice(0, 1)
-      stage.review = { reviewerRoleIds: stage.roleIds, instructions: stage.review?.instructions ?? '' }
+      stage.review = normalizedReviewConfig(stage)
     } else {
       delete stage.review
       stage.name = stage.name.trim() || getRoleName(stage.roleIds[0] ?? '') || '执行'
@@ -392,7 +414,8 @@ export function createOrchestrationModalView(deps: OrchestrationModalDependencie
         stageNodes: stages,
         edges: graphEdges,
       },
-      maxRounds: readMaxRoundsInput(deps.orchestrationMaxRoundsEl),
+      maxNodeExecutions: readMaxNodeExecutionsInput(deps.orchestrationMaxRoundsEl),
+      maxRounds: readMaxNodeExecutionsInput(deps.orchestrationMaxRoundsEl),
       createdAt: now,
       updatedAt: now,
     }
@@ -420,9 +443,9 @@ export function createOrchestrationModalView(deps: OrchestrationModalDependencie
       deps.showError('审核节点需要审核人员和审核标准')
       return false
     }
-    const rawMaxRounds = Number(deps.orchestrationMaxRoundsEl.value)
-    if (!Number.isFinite(rawMaxRounds) || rawMaxRounds < 1 || rawMaxRounds > MAX_ORCHESTRATION_MAX_ROUNDS) {
-      deps.showError(`最大轮数需在 1-${MAX_ORCHESTRATION_MAX_ROUNDS} 之间`)
+    const rawMaxNodeExecutions = Number(deps.orchestrationMaxRoundsEl.value)
+    if (!Number.isFinite(rawMaxNodeExecutions) || rawMaxNodeExecutions < 1 || rawMaxNodeExecutions > MAX_ORCHESTRATION_MAX_NODE_EXECUTIONS) {
+      deps.showError(`最大节点执行数需在 1-${MAX_ORCHESTRATION_MAX_NODE_EXECUTIONS} 之间`)
       return false
     }
     return true
@@ -472,6 +495,16 @@ function cloneStages(stages: OrchestrationStage[]): OrchestrationStage[] {
     roleIds: [...stage.roleIds],
     review: stage.review ? { ...stage.review, reviewerRoleIds: [...stage.review.reviewerRoleIds] } : undefined,
   }))
+}
+
+function normalizedReviewConfig(stage: OrchestrationStage, patch: Partial<NonNullable<OrchestrationStage['review']>> = {}): NonNullable<OrchestrationStage['review']> {
+  return {
+    reviewerRoleIds: stage.review?.reviewerRoleIds?.length ? [...stage.review.reviewerRoleIds] : [...stage.roleIds.slice(0, 1)],
+    instructions: stage.review?.instructions ?? '',
+    maxAttempts: clampReviewAttempts(stage.review?.maxAttempts ?? DEFAULT_ORCHESTRATION_REVIEW_MAX_ATTEMPTS),
+    onMaxAttempts: stage.review?.onMaxAttempts === 'continue' ? 'continue' : 'stop',
+    ...patch,
+  }
 }
 
 function cloneGraphEdges(edges: OrchestrationGraphSnapshot['edges']): OrchestrationGraphSnapshot['edges'] {
@@ -544,13 +577,18 @@ export function orderStagesByGraph(stages: OrchestrationStage[], edges: Orchestr
   return [...ordered, ...stages.filter(stage => !emitted.has(stage.id))]
 }
 
-function clampMaxRounds(value: number): number {
-  if (!Number.isFinite(value)) return DEFAULT_ORCHESTRATION_MAX_ROUNDS
-  return Math.min(MAX_ORCHESTRATION_MAX_ROUNDS, Math.max(1, Math.trunc(value)))
+function clampMaxNodeExecutions(value: number): number {
+  if (!Number.isFinite(value)) return DEFAULT_ORCHESTRATION_MAX_NODE_EXECUTIONS
+  return Math.min(MAX_ORCHESTRATION_MAX_NODE_EXECUTIONS, Math.max(1, Math.trunc(value)))
 }
 
-function readMaxRoundsInput(input: HTMLInputElement): number {
-  return clampMaxRounds(Number(input.value || DEFAULT_ORCHESTRATION_MAX_ROUNDS))
+function readMaxNodeExecutionsInput(input: HTMLInputElement): number {
+  return clampMaxNodeExecutions(Number(input.value || DEFAULT_ORCHESTRATION_MAX_NODE_EXECUTIONS))
+}
+
+function clampReviewAttempts(value: number): number {
+  if (!Number.isFinite(value)) return DEFAULT_ORCHESTRATION_REVIEW_MAX_ATTEMPTS
+  return Math.min(50, Math.max(1, Math.trunc(value)))
 }
 
 function roleInitial(name: string): string {

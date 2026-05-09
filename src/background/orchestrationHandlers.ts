@@ -1,4 +1,11 @@
-import type { OrchestrationFlow, OpenTeamStore } from '../group/types'
+import {
+  DEFAULT_ORCHESTRATION_MAX_NODE_EXECUTIONS,
+  DEFAULT_ORCHESTRATION_MAX_ROUNDS,
+  MAX_ORCHESTRATION_MAX_NODE_EXECUTIONS,
+  MAX_ORCHESTRATION_MAX_ROUNDS,
+  type OrchestrationFlow,
+  type OpenTeamStore,
+} from '../group/types'
 import type { BackgroundMessageRoute } from './messageRouter'
 import { type RuntimeMessage } from './runtimeClient'
 import { mutateStore, requireChat } from './storeAccess'
@@ -50,6 +57,7 @@ export function createOrchestrationHandlers(deps: OrchestrationHandlersDependenc
           flowId,
           task: requireString(message.task ?? message.raw, '编排任务不能为空'),
           maxRounds: typeof message.maxRounds === 'number' ? message.maxRounds : submittedFlow?.maxRounds,
+          maxNodeExecutions: typeof message.maxNodeExecutions === 'number' ? message.maxNodeExecutions : submittedFlow?.maxNodeExecutions,
         })
         return { ok: true, ...response }
       },
@@ -81,6 +89,7 @@ async function persistFlowDraft(deps: OrchestrationHandlersDependencies, flow: O
       ...flow,
       name: flow.name.trim(),
       stages: flow.stages,
+      maxNodeExecutions: normalizeMaxNodeExecutions(flow.maxNodeExecutions),
       maxRounds: normalizeMaxRounds(flow.maxRounds),
       createdAt: store.orchestrationFlowsById[flow.id]?.createdAt ?? flow.createdAt ?? timestamp,
       updatedAt: timestamp,
@@ -100,9 +109,14 @@ function requireFlowPayload(value: unknown): OrchestrationFlow {
   return value as unknown as OrchestrationFlow
 }
 
-function normalizeMaxRounds(value: number): number {
-  if (!Number.isFinite(value)) return 1
-  return Math.min(50, Math.max(1, Math.floor(value)))
+function normalizeMaxRounds(value: number | undefined): number {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return DEFAULT_ORCHESTRATION_MAX_ROUNDS
+  return Math.min(MAX_ORCHESTRATION_MAX_ROUNDS, Math.max(1, Math.floor(value)))
+}
+
+function normalizeMaxNodeExecutions(value: number | undefined): number {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return DEFAULT_ORCHESTRATION_MAX_NODE_EXECUTIONS
+  return Math.min(MAX_ORCHESTRATION_MAX_NODE_EXECUTIONS, Math.max(1, Math.floor(value)))
 }
 
 function readOptionalString(value: unknown): string | undefined {

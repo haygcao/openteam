@@ -405,7 +405,7 @@ export function createMessagesView(deps: MessagesViewDependencies): MessagesView
     summary.append(reviewSummaryLine('决策', reviewDecisionLabel(result.decision)))
     if (result.reason) summary.append(reviewSummaryLine('原因', result.reason))
     if (result.failedCriteria.length > 0) summary.append(reviewSummaryLine('未通过', result.failedCriteria.join('、')))
-    if (result.nextRoundInstruction) summary.append(reviewSummaryLine('下一轮', result.nextRoundInstruction))
+    if (result.nextRoundInstruction) summary.append(reviewSummaryLine('重试说明', result.nextRoundInstruction))
     return summary
   }
 

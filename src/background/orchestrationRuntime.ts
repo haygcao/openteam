@@ -1,8 +1,9 @@
 import { buildOrchestrationReviewMessageContent, buildOrchestrationRoleMessageContent } from '../group/orchestrationPrompts'
 import { parseReviewDecision } from '../group/orchestrationReview'
 import {
-  DEFAULT_ORCHESTRATION_MAX_ROUNDS,
-  MAX_ORCHESTRATION_MAX_ROUNDS,
+  DEFAULT_ORCHESTRATION_MAX_NODE_EXECUTIONS,
+  DEFAULT_ORCHESTRATION_REVIEW_MAX_ATTEMPTS,
+  MAX_ORCHESTRATION_MAX_NODE_EXECUTIONS,
   type GroupChat,
   type GroupMessage,
   type OpenTeamStore,
@@ -54,7 +55,7 @@ interface StartStagePreparationRetry {
   reason: string
 }
 
-export async function startOrchestrationRun(deps: OrchestrationRuntimeDependencies, input: { chatId: string; flowId: string; task: string; maxRounds?: number }): Promise<{ store: OpenTeamStore; run: OrchestrationRun }> {
+export async function startOrchestrationRun(deps: OrchestrationRuntimeDependencies, input: { chatId: string; flowId: string; task: string; maxRounds?: number; maxNodeExecutions?: number }): Promise<{ store: OpenTeamStore; run: OrchestrationRun }> {
   const timestamp = deps.now()
   const { store, result } = await mutateStore(store => {
     const chat = requireChat(store, input.chatId)
@@ -69,7 +70,7 @@ export async function startOrchestrationRun(deps: OrchestrationRuntimeDependenci
     }
     if (activeRunId && !activeRun) delete store.activeOrchestrationRunIdByChatId[chat.id]
 
-    const maxRounds = normalizeMaxRounds(input.maxRounds ?? flow.maxRounds)
+    const maxNodeExecutions = normalizeMaxNodeExecutions(input.maxNodeExecutions ?? flow.maxNodeExecutions)
     const taskMessage: GroupMessage = {
       id: deps.newId('msg'),
       chatId: chat.id,
@@ -91,7 +92,8 @@ export async function startOrchestrationRun(deps: OrchestrationRuntimeDependenci
       flowId: flow.id,
       status: 'pending',
       currentRound: 1,
-      maxRounds,
+      maxNodeExecutions,
+      maxRounds: maxNodeExecutions,
       stageRuns: [],
       createdAt: timestamp,
       updatedAt: timestamp,
@@ -213,7 +215,7 @@ export async function maybeAdvanceOrchestrationRun(deps: OrchestrationRuntimeDep
     if (!allRoleRunsFinished(stageRun)) return { next: false as const }
     stageRun.status = 'completed'
     stageRun.completedAt = timestamp
-    return nextStageDecision(store, chat, run, timestamp)
+    return nextStageDecision(store, chat, run, stageRun, timestamp)
   })
 
   await deps.broadcastStoreUpdated(advance.store)
@@ -286,7 +288,7 @@ export async function skipOrchestrationStage(deps: OrchestrationRuntimeDependenc
     run.status = 'running'
     delete run.error
     run.updatedAt = timestamp
-    return nextStageDecision(store, chat, run, timestamp)
+    return nextStageDecision(store, chat, run, stageRun, timestamp)
   })
   await deps.broadcastStoreUpdated(advance.store)
   if (advance.result.next) await startStages(deps, advance.result.runId, advance.result.stageIndices)
@@ -315,6 +317,10 @@ async function startStage(deps: OrchestrationRuntimeDependencies, runId: string,
     const stage = flow.stages[stageIndex]
     if (!stage) {
       completeRun(store, chat, run, timestamp)
+      return { deliveries: [], externalDeliveries: [] }
+    }
+    if (run.stageRuns.length >= maxNodeExecutionsForRun(run)) {
+      failRun(store, chat, run, `已达到最大节点执行数（${maxNodeExecutionsForRun(run)}），流程可能存在未收敛的循环。`, timestamp)
       return { deliveries: [], externalDeliveries: [] }
     }
 
@@ -523,32 +529,34 @@ function lastReviewResult(run: OrchestrationRun): OrchestrationReviewResult | un
   return undefined
 }
 
-function nextStageDecision(store: OpenTeamStore, chat: GroupChat, run: OrchestrationRun, timestamp: number, options: { allowNextRound?: boolean } = {}): NextStageDecision {
+function nextStageDecision(store: OpenTeamStore, chat: GroupChat, run: OrchestrationRun, completedStageRun: OrchestrationStageRun, timestamp: number): NextStageDecision {
   const flow = requireFlow(store, chat.id, run.flowId)
-  const readyStageIndices = findReadyStageIndices(flow, run)
+  const readyStageIndices = outgoingReadyStageIndices(flow, run, completedStageRun.stageId)
   if (readyStageIndices.length > 0) return { next: true, runId: run.id, stageIndices: readyStageIndices }
   if (hasRunningStageRuns(run)) return { next: false }
-  if (options.allowNextRound !== false && run.currentRound < run.maxRounds) {
-    run.currentRound += 1
-    run.updatedAt = timestamp
-    return { next: true, runId: run.id, stageIndices: rootStageIndices(flow) }
-  }
   completeRun(store, chat, run, timestamp)
   return { next: false }
 }
 
 function applyReviewDecision(store: OpenTeamStore, chat: GroupChat, run: OrchestrationRun, stageRun: OrchestrationStageRun, decision: 'pass' | 'fail', timestamp: number): NextStageDecision {
-  if (decision === 'fail' && run.currentRound < run.maxRounds) {
-    run.currentRound += 1
-    run.updatedAt = timestamp
-    const flow = requireFlow(store, chat.id, run.flowId)
-    const branchTargets = reviewBranchStageIndices(flow, stageRun.stageId, 'fail')
-    return { next: true, runId: run.id, stageIndices: branchTargets.length > 0 ? branchTargets : rootStageIndices(flow) }
+  const flow = requireFlow(store, chat.id, run.flowId)
+  const stage = flow.stages[stageRun.stageIndex]
+  if (!stage) return nextStageDecision(store, chat, run, stageRun, timestamp)
+  if (decision === 'fail' && reviewAttemptCount(run, stage.id) >= reviewMaxAttempts(stage)) {
+    if (stage.review?.onMaxAttempts !== 'continue') {
+      failRun(store, chat, run, `审核未通过，已达到最大审核次数（${reviewMaxAttempts(stage)} 次）`, timestamp)
+      return { next: false }
+    }
+    const continueTargets = reviewBranchStageIndices(flow, stageRun.stageId, 'pass')
+    if (continueTargets.length > 0) return { next: true, runId: run.id, stageIndices: continueTargets }
+    if (!hasRunningStageRuns(run)) completeRun(store, chat, run, timestamp)
+    return { next: false }
   }
-  if (decision === 'fail' && run.currentRound >= run.maxRounds) {
-    run.error = '已达到最大轮次，编排自动完成'
-  }
-  return nextStageDecision(store, chat, run, timestamp, { allowNextRound: decision !== 'pass' })
+
+  const branchTargets = reviewBranchStageIndices(flow, stageRun.stageId, decision)
+  if (branchTargets.length > 0) return { next: true, runId: run.id, stageIndices: branchTargets }
+  if (!hasRunningStageRuns(run)) completeRun(store, chat, run, timestamp)
+  return { next: false }
 }
 
 function completeRun(store: OpenTeamStore, chat: GroupChat, run: OrchestrationRun, timestamp: number): void {
@@ -560,6 +568,16 @@ function completeRun(store: OpenTeamStore, chat: GroupChat, run: OrchestrationRu
   chat.updatedAt = timestamp
 }
 
+function failRun(store: OpenTeamStore, chat: GroupChat, run: OrchestrationRun, reason: string, timestamp: number): void {
+  run.status = 'error'
+  run.error = reason
+  run.completedAt = timestamp
+  run.updatedAt = timestamp
+  delete store.activeOrchestrationRunIdByChatId[chat.id]
+  chat.status = 'error'
+  chat.updatedAt = timestamp
+}
+
 function requireFlow(store: OpenTeamStore, chatId: string, flowId: string): OrchestrationFlow {
   const flow = store.orchestrationFlowsById[flowId]
   if (!flow || flow.chatId !== chatId) throw new Error(`找不到编排流程：${flowId}`)
@@ -568,7 +586,6 @@ function requireFlow(store: OpenTeamStore, chatId: string, flowId: string): Orch
 
 function validateExecutableFlow(store: OpenTeamStore, chat: GroupChat, flow: OrchestrationFlow): void {
   if (!Array.isArray(flow.stages) || flow.stages.length === 0) throw new Error('编排流程没有可执行节点')
-  if (rootStageIndices(flow).length === 0) throw new Error('编排流程存在循环，无法找到起始节点')
   for (const stage of flow.stages) {
     if (stage.kind === 'roles' && stage.roleIds.length === 0) throw new Error(`执行节点缺少人员：${stage.name}`)
     if (stage.kind === 'review' && stage.review?.reviewerRoleIds?.length !== 1) throw new Error(`复核节点必须绑定一个复核人员：${stage.name}`)
@@ -612,9 +629,9 @@ async function waitForStagePreparationRetry(deps: Pick<OrchestrationRuntimeDepen
   await new Promise<void>(resolve => setTimeout(resolve, delayMs))
 }
 
-function normalizeMaxRounds(value: number | undefined): number {
-  if (typeof value !== 'number' || !Number.isFinite(value)) return DEFAULT_ORCHESTRATION_MAX_ROUNDS
-  return Math.min(MAX_ORCHESTRATION_MAX_ROUNDS, Math.max(1, Math.floor(value)))
+function normalizeMaxNodeExecutions(value: number | undefined): number {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return DEFAULT_ORCHESTRATION_MAX_NODE_EXECUTIONS
+  return Math.min(MAX_ORCHESTRATION_MAX_NODE_EXECUTIONS, Math.max(1, Math.floor(value)))
 }
 
 function currentStageRun(run: OrchestrationRun): OrchestrationStageRun | undefined {
@@ -634,7 +651,7 @@ function allRoleRunsFinished(stageRun: OrchestrationStageRun): boolean {
 }
 
 function hasRunningStageRuns(run: OrchestrationRun): boolean {
-  return run.stageRuns.some(stageRun => stageRun.round === run.currentRound && stageRun.status === 'running')
+  return run.stageRuns.some(stageRun => stageRun.status === 'running')
 }
 
 async function isOrchestrationPromptDeliveryStillActive(chatId: string, roleId: string, messageId: string, replyAttemptId: string | undefined): Promise<boolean> {
@@ -654,7 +671,7 @@ async function isOrchestrationPromptDeliveryStillActive(chatId: string, roleId: 
 
 function hasLiveRunningRolePrompt(store: OpenTeamStore, chat: GroupChat, run: OrchestrationRun): boolean {
   return run.stageRuns.some(stageRun => {
-    if (stageRun.round !== run.currentRound || stageRun.status !== 'running') return false
+    if (stageRun.status !== 'running') return false
     return Object.values(stageRun.roleRuns).some(roleRun => {
       if (roleRun.status !== 'running' || !roleRun.messageId) return false
       const role = store.rolesById[roleRun.roleId]
@@ -683,26 +700,43 @@ function stopStaleActiveRun(store: OpenTeamStore, chat: GroupChat, run: Orchestr
   delete store.activeOrchestrationRunIdByChatId[chat.id]
 }
 
-function findReadyStageIndices(flow: OrchestrationFlow, run: OrchestrationRun): number[] {
+function outgoingReadyStageIndices(flow: OrchestrationFlow, run: OrchestrationRun, sourceStageId: string): number[] {
   const stageIndexById = new Map(flow.stages.map((stage, index) => [stage.id, index]))
-  const incoming = incomingEdgesByTarget(flow)
-  const started = new Set(run.stageRuns.filter(stageRun => stageRun.round === run.currentRound).map(stageRun => stageRun.stageId))
-  const completed = new Set(run.stageRuns.filter(stageRun => stageRun.round === run.currentRound && (stageRun.status === 'completed' || stageRun.status === 'skipped')).map(stageRun => stageRun.stageId))
-  const ready: number[] = []
-  for (const stage of flow.stages) {
-    if (started.has(stage.id)) continue
-    const dependencies = incoming.get(stage.id) ?? []
-    if (dependencies.every(stageId => completed.has(stageId))) {
-      const index = stageIndexById.get(stage.id)
-      if (typeof index === 'number') ready.push(index)
-    }
-  }
-  return ready
+  const candidateIds = effectiveGraphEdges(flow)
+    .filter(edge => edge.sourceStageId === sourceStageId && reviewEdgeBranch(edge) !== 'fail')
+    .map(edge => edge.targetStageId)
+  const ready = candidateIds
+    .filter(stageId => isStageReadyFromIncoming(flow, run, stageId))
+    .map(stageId => stageIndexById.get(stageId))
+    .filter((index): index is number => typeof index === 'number')
+  return uniqueNumbers(ready)
+}
+
+function isStageReadyFromIncoming(flow: OrchestrationFlow, run: OrchestrationRun, stageId: string): boolean {
+  if (run.stageRuns.some(stageRun => stageRun.stageId === stageId && stageRun.status === 'running')) return false
+  const incoming = incomingEdgesByTarget(flow).get(stageId) ?? []
+  if (incoming.length <= 1) return true
+  return incoming.every(sourceStageId => run.stageRuns.some(stageRun => stageRun.stageId === sourceStageId && (stageRun.status === 'completed' || stageRun.status === 'skipped')))
+}
+
+function maxNodeExecutionsForRun(run: OrchestrationRun): number {
+  return normalizeMaxNodeExecutions(run.maxNodeExecutions ?? run.maxRounds)
+}
+
+function reviewMaxAttempts(stage: OrchestrationStage): number {
+  const value = stage.review?.maxAttempts
+  if (typeof value !== 'number' || !Number.isFinite(value)) return DEFAULT_ORCHESTRATION_REVIEW_MAX_ATTEMPTS
+  return Math.min(MAX_ORCHESTRATION_MAX_NODE_EXECUTIONS, Math.max(1, Math.floor(value)))
+}
+
+function reviewAttemptCount(run: OrchestrationRun, stageId: string): number {
+  return run.stageRuns.filter(stageRun => stageRun.stageId === stageId && stageRun.kind === 'review').length
 }
 
 function rootStageIndices(flow: OrchestrationFlow): number[] {
   const targetIds = new Set(dependencyGraphEdges(flow).map(edge => edge.targetStageId))
-  return flow.stages.map((stage, index) => targetIds.has(stage.id) ? undefined : index).filter((index): index is number => typeof index === 'number')
+  const roots = flow.stages.map((stage, index) => targetIds.has(stage.id) ? undefined : index).filter((index): index is number => typeof index === 'number')
+  return roots.length > 0 ? roots : [0]
 }
 
 function incomingEdgesByTarget(flow: OrchestrationFlow): Map<string, string[]> {
@@ -720,9 +754,15 @@ function dependencyGraphEdges(flow: OrchestrationFlow): OrchestrationGraphSnapsh
 function reviewBranchStageIndices(flow: OrchestrationFlow, reviewStageId: string, branch: 'pass' | 'fail'): number[] {
   const stageIndexById = new Map(flow.stages.map((stage, index) => [stage.id, index]))
   return effectiveGraphEdges(flow)
-    .filter(edge => edge.sourceStageId === reviewStageId && reviewEdgeBranch(edge) === branch)
+    .filter(edge => edge.sourceStageId === reviewStageId && reviewEdgeMatchesBranch(edge, branch))
     .map(edge => stageIndexById.get(edge.targetStageId))
     .filter((index): index is number => typeof index === 'number')
+}
+
+function reviewEdgeMatchesBranch(edge: OrchestrationGraphSnapshot['edges'][number], branch: 'pass' | 'fail'): boolean {
+  const edgeBranch = reviewEdgeBranch(edge)
+  if (branch === 'pass') return edgeBranch !== 'fail'
+  return edgeBranch === 'fail'
 }
 
 function reviewEdgeBranch(edge: OrchestrationGraphSnapshot['edges'][number]): 'pass' | 'fail' | undefined {

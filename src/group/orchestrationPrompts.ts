@@ -34,7 +34,7 @@ export function buildOrchestrationReviewResponseInstruction(): string {
   return joinSections([
     '你必须只返回合法 JSON，不要 Markdown，不要解释文字，不要代码块。',
     `JSON 格式必须匹配：\n${reviewSchema()}`,
-    'decision 只能是 pass 或 fail。不通过时使用 fail，并在 nextRoundInstruction 写清楚下一轮要改什么。',
+    'decision 只能是 pass 或 fail。不通过时使用 fail，并在 nextRoundInstruction 写清楚下一次重试要改什么。',
   ])
 }
 

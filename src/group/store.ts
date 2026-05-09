@@ -1,4 +1,10 @@
-import { DEFAULT_ORCHESTRATION_MAX_ROUNDS, MAX_ORCHESTRATION_MAX_ROUNDS } from './types'
+import {
+  DEFAULT_ORCHESTRATION_MAX_NODE_EXECUTIONS,
+  DEFAULT_ORCHESTRATION_MAX_ROUNDS,
+  DEFAULT_ORCHESTRATION_REVIEW_MAX_ATTEMPTS,
+  MAX_ORCHESTRATION_MAX_NODE_EXECUTIONS,
+  MAX_ORCHESTRATION_MAX_ROUNDS,
+} from './types'
 import type { ExternalModelConfig, GroupChat, GroupMessage, GroupRole, MessageHighlight, OpenTeamSettings, OpenTeamStore, OpenTeamViewState, OrchestrationFlow, OrchestrationRun, RichNoteDocument, RoleTemplate } from './types'
 import { normalizeMessageHighlightColor } from './highlightColors'
 import { DEFAULT_CUSTOM_ROLE_TEMPLATES } from './defaultCustomRoleTemplates'
@@ -414,6 +420,7 @@ function normalizeOrchestrationFlowRecord(raw: unknown): Record<string, Orchestr
       ...(value as unknown as OrchestrationFlow),
       stages: executableStages,
       graph: normalizeOrchestrationGraphSnapshot(value.graph),
+      maxNodeExecutions: normalizeOrchestrationMaxNodeExecutions(value.maxNodeExecutions),
       maxRounds: normalizeOrchestrationMaxRounds(value.maxRounds),
       createdAt: typeof value.createdAt === 'number' ? value.createdAt : 0,
       updatedAt: typeof value.updatedAt === 'number' ? value.updatedAt : 0,
@@ -427,11 +434,24 @@ function normalizeOrchestrationStages(raw: unknown): OrchestrationFlow['stages']
   return raw.flatMap(stage => {
     if (!isRecord(stage) || typeof stage.id !== 'string' || (stage.kind !== 'roles' && stage.kind !== 'review') || typeof stage.name !== 'string' || !Array.isArray(stage.roleIds)) return []
     const position = normalizeOrchestrationNodePosition(stage.position)
+    const review = normalizeOrchestrationReviewConfig(stage.review)
     return [{
       ...(stage as unknown as OrchestrationFlow['stages'][number]),
+      ...(review ? { review } : {}),
       ...(position ? { position } : {}),
     }]
   })
+}
+
+function normalizeOrchestrationReviewConfig(raw: unknown): OrchestrationFlow['stages'][number]['review'] | undefined {
+  if (!isRecord(raw) || !Array.isArray(raw.reviewerRoleIds)) return undefined
+  return {
+    ...raw,
+    reviewerRoleIds: readStringArray(raw.reviewerRoleIds, []),
+    instructions: typeof raw.instructions === 'string' ? raw.instructions : undefined,
+    maxAttempts: normalizeOrchestrationReviewMaxAttempts(raw.maxAttempts),
+    onMaxAttempts: raw.onMaxAttempts === 'continue' ? 'continue' : 'stop',
+  }
 }
 
 function normalizeOrchestrationNodePosition(raw: unknown): OrchestrationFlow['stages'][number]['position'] | undefined {
@@ -486,6 +506,7 @@ function normalizeOrchestrationRunRecord(raw: unknown): Record<string, Orchestra
       ...(value as unknown as OrchestrationRun),
       status: normalizeOrchestrationRunStatus(value.status),
       currentRound: typeof value.currentRound === 'number' ? value.currentRound : 1,
+      maxNodeExecutions: normalizeOrchestrationMaxNodeExecutions(value.maxNodeExecutions),
       maxRounds: normalizeOrchestrationMaxRounds(value.maxRounds),
       stageRuns: Array.isArray(value.stageRuns) ? value.stageRuns as OrchestrationRun['stageRuns'] : [],
       createdAt: typeof value.createdAt === 'number' ? value.createdAt : 0,
@@ -502,6 +523,16 @@ function normalizeOrchestrationRunStatus(raw: unknown): OrchestrationRun['status
 function normalizeOrchestrationMaxRounds(raw: unknown): number {
   if (typeof raw !== 'number' || !Number.isFinite(raw)) return DEFAULT_ORCHESTRATION_MAX_ROUNDS
   return Math.min(MAX_ORCHESTRATION_MAX_ROUNDS, Math.max(1, Math.floor(raw)))
+}
+
+function normalizeOrchestrationMaxNodeExecutions(raw: unknown): number {
+  if (typeof raw !== 'number' || !Number.isFinite(raw)) return DEFAULT_ORCHESTRATION_MAX_NODE_EXECUTIONS
+  return Math.min(MAX_ORCHESTRATION_MAX_NODE_EXECUTIONS, Math.max(1, Math.floor(raw)))
+}
+
+function normalizeOrchestrationReviewMaxAttempts(raw: unknown): number {
+  if (typeof raw !== 'number' || !Number.isFinite(raw)) return DEFAULT_ORCHESTRATION_REVIEW_MAX_ATTEMPTS
+  return Math.min(MAX_ORCHESTRATION_MAX_NODE_EXECUTIONS, Math.max(1, Math.floor(raw)))
 }
 
 function shouldSeedDefaultCustomTemplates(storedVersion: number, store: OpenTeamStore): boolean {

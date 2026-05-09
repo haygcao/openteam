@@ -65,9 +65,9 @@ export function createOrchestrationStatusView(deps: OrchestrationStatusViewDepen
   function statusTitle(run: OrchestrationRun, flow: OrchestrationFlow, current: OrchestrationStageRun | undefined): string {
     const stageCount = flow.stages.length
     const step = current ? current.stageIndex + 1 : Math.min(run.stageRuns.length, stageCount)
-    if (run.status === 'running') return `编排运行中 · 第 ${run.currentRound} 轮 · 第 ${Math.max(1, step)} 步 / 共 ${stageCount} 步`
-    if (run.status === 'pending') return `编排等待中 · 第 ${run.currentRound} 轮 · 第 ${Math.max(1, step)} 步 / 共 ${stageCount} 步`
-    return `${STATUS_LABELS[run.status]} · 第 ${run.currentRound} 轮 · 第 ${Math.max(1, step)} 步 / 共 ${stageCount} 步`
+    const executed = run.stageRuns.length
+    const maxExecutions = run.maxNodeExecutions ?? run.maxRounds
+    return `${STATUS_LABELS[run.status]} · 已执行 ${executed} / ${maxExecutions} 个节点 · 第 ${Math.max(1, step)} / ${stageCount} 个节点`
   }
 
   function currentRoleText(current: OrchestrationStageRun | undefined): string | undefined {

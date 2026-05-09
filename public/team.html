@@ -500,10 +500,10 @@
         </div>
         <div class="orchestration-footer">
           <label class="field orchestration-rounds-field" for="orchestration-max-rounds">
-            <span>最大轮数</span>
-            <input id="orchestration-max-rounds" type="number" min="1" max="50" value="1" />
+            <span>最大节点执行数</span>
+            <input id="orchestration-max-rounds" type="number" min="1" max="200" value="50" />
           </label>
-          <p class="tiny">默认 1 轮，最多 50 轮；没有审核节点时会按最大轮数重复执行，有审核节点时通过即结束、继续时进入下一轮。</p>
+          <p class="tiny">默认 50 个，最多 200 个；用于防止循环流程无限执行，执行节点和审核节点都会计数。</p>
           <div class="template-actions orchestration-actions">
             <button id="save-orchestration" class="btn" type="button">保存</button>
             <button id="run-orchestration" class="btn btn-primary" type="button">运行</button>
