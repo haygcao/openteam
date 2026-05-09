@@ -106,11 +106,6 @@ export function createTeamUiController(deps: TeamUiControllerDependencies): Team
       deps.renderRolePanel()
     })
 
-    requireElement<HTMLButtonElement>('#close-window').addEventListener('click', () => {
-      if (!window.confirm('确定要关闭 OpenTeam 窗口吗？')) return
-      window.close()
-    })
-
     requireElement<HTMLButtonElement>('#cancel-create-chat').addEventListener('click', () => {
       setChatCreatePopoverVisible(false)
     })

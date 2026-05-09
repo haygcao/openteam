@@ -73,6 +73,8 @@ describe('team.html chat creation UI', () => {
     expect(html).toContain('id="template-site-chatgpt"')
     expect(html).toContain('id="template-site-claude"')
     expect(html).toContain('id="template-site-deepseek"')
+    expect(html).not.toMatch(/id="template-site-gemini"[^>]*checked/)
+    expect(html).toMatch(/id="template-site-deepseek"[^>]*checked/)
     for (const site of REMOVED_SITE_IDS) {
       expect(html).not.toContain(`id="template-site-${site}"`)
       expect(html).not.toContain(`for="template-site-${site}"`)
@@ -237,16 +239,29 @@ describe('team.html chat creation UI', () => {
     expect(html).toContain('class="icon-btn window-dot window-dot-close"')
     expect(html).toContain('class="icon-btn window-dot window-dot-minimize"')
     expect(html).toContain('class="icon-btn window-dot window-dot-fullscreen"')
-    expect(toolbarRule).toContain('left: 18px;')
-    expect(toolbarRule).toContain('right: auto;')
+    expect(toolbarRule).toContain('left: auto;')
+    expect(toolbarRule).toContain('right: 18px;')
+    expect(toolbarRule).toContain('top: 6px;')
+    expect(toolbarRule).toContain('height: 11px;')
+    expect(toolbarRule).toContain('flex-direction: row-reverse;')
     expect(toolbarRule).toContain('z-index: 12;')
-    expect(fullscreenToolbarRule).toContain('left: 18px;')
-    expect(fullscreenToolbarRule).toContain('right: auto;')
+    expect(fullscreenToolbarRule).toContain('left: auto;')
+    expect(fullscreenToolbarRule).toContain('right: 18px;')
+    expect(fullscreenToolbarRule).toContain('top: 6px;')
     expect(html).toMatch(/\.floating-toolbar \.icon-btn\s*{[^}]*width:\s*11px;[^}]*height:\s*11px;/s)
     expect(html).toMatch(/\.floating-toolbar \.icon-btn\.window-dot-close\s*{[^}]*background:\s*#ff5f57;/s)
     expect(html).toMatch(/\.floating-toolbar \.icon-btn\.window-dot-minimize\s*{[^}]*background:\s*#febc2e;/s)
     expect(html).toMatch(/\.floating-toolbar \.icon-btn\.window-dot-fullscreen\s*{[^}]*background:\s*#28c840;/s)
     expect(html).toMatch(/\.floating-toolbar \.icon-btn\.window-dot:hover\s*{[^}]*border-color:\s*rgba\(0,\s*0,\s*0,\s*0\.24\);[^}]*filter:\s*brightness\(1\.04\);/s)
+  })
+
+  it('uses the top-right close affordance to shrink the floating window', () => {
+    const html = readTeamDocument()
+    const source = readFileSync(resolve(process.cwd(), 'src/teamPage/floatingWindow.ts'), 'utf8')
+
+    expect(html).toContain('id="close-window"')
+    expect(html).toMatch(/id="close-window"[^>]*aria-label="缩小窗口"/)
+    expect(source).toContain("closeWindowEl?.addEventListener('click', () => setWindowMinimized(true))")
   })
 
   it('uses template default sites for library people and the add-person picker for temporary people', () => {
@@ -582,11 +597,13 @@ describe('team.html chat creation UI', () => {
     expect(uiSource).not.toContain('refreshCurrentChat().catch')
   })
 
-  it('asks for confirmation before closing the OpenTeam window', () => {
+  it('shrinks instead of closing the OpenTeam window from the close control', () => {
     const source = readFileSync(resolve(process.cwd(), 'src/teamPage/teamUiController.ts'), 'utf8')
+    const floatingSource = readFileSync(resolve(process.cwd(), 'src/teamPage/floatingWindow.ts'), 'utf8')
 
-    expect(source).toContain("window.confirm('确定要关闭 OpenTeam 窗口吗？')")
-    expect(source).toContain('window.close()')
+    expect(source).not.toContain("window.confirm('确定要关闭 OpenTeam 窗口吗？')")
+    expect(source).not.toContain('window.close()')
+    expect(floatingSource).toContain("closeWindowEl?.addEventListener('click', () => setWindowMinimized(true))")
   })
 
   it('uses a refined composer and desktop-style chat header', () => {

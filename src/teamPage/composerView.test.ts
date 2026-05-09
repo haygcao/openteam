@@ -41,14 +41,14 @@ describe('team page composer targeting', () => {
     const options = [...deps.mentionPanelEl.querySelectorAll<HTMLButtonElement>('.mention-option')]
     expect(deps.mentionPanelEl.hidden).toBe(false)
     expect(options.map(option => option.querySelector('.mention-name')?.textContent)).toEqual(['所有人', '工程师'])
-    expect(options.map(option => option.querySelector('.mention-site-badge')?.textContent)).toEqual(['全员', 'Gemini'])
+    expect(options.map(option => option.querySelector('.mention-site-badge')?.textContent)).toEqual(['全员', 'DeepSeek'])
 
     options[0].click()
 
     expect(deps.messageInputEl.value).toBe('@所有人 ')
     deps.messageInputEl.value = '@所有人 请一起看'
     view.renderComposerState()
-    expect(deps.targetPreviewEl.textContent).toBe('将发送给：工程师（Gemini）')
+    expect(deps.targetPreviewEl.textContent).toBe('将发送给：工程师（DeepSeek）')
   })
 
   it('previews no-mention messages as chat records without requiring ready roles', () => {

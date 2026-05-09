@@ -1,5 +1,6 @@
 export interface FloatingWindowDependencies {
   appShellEl: HTMLElement
+  closeWindowEl?: HTMLButtonElement
   toggleWindowSizeEl: HTMLButtonElement
   toggleFullscreenEl: HTMLButtonElement
   windowLauncherEl: HTMLButtonElement
@@ -144,6 +145,7 @@ export function createFloatingWindowControls(deps: FloatingWindowDependencies): 
 
     deps.windowResizeHandleEl?.addEventListener('pointerup', stopResizing)
     deps.windowResizeHandleEl?.addEventListener('pointercancel', stopResizing)
+    deps.closeWindowEl?.addEventListener('click', () => setWindowMinimized(true))
     deps.toggleWindowSizeEl.addEventListener('click', () => setWindowMinimized(!deps.appShellEl.classList.contains('minimized')))
     deps.toggleFullscreenEl.addEventListener('click', () => setWindowFullscreen(!deps.appShellEl.classList.contains('fullscreen')))
     setWindowFullscreen(deps.appShellEl.classList.contains('fullscreen'))

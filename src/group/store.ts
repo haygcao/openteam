@@ -13,7 +13,7 @@ export const STORE_KEY = 'openteam.groupStore'
 export const META_STORE_KEY = 'openteam.meta.v2'
 export const CHAT_KEY_PREFIX = 'openteam.chat.'
 export const MESSAGE_CHUNK_KEY_PREFIX = 'openteam.messages.'
-export const CURRENT_STORE_VERSION = 5
+export const CURRENT_STORE_VERSION = 6
 export const MESSAGE_CHUNK_SIZE = 100
 
 interface OpenTeamMetaStore {
@@ -55,7 +55,7 @@ interface MessageChunk {
 const DEFAULT_SETTINGS: OpenTeamSettings = {
   defaultMode: 'independent',
   maxContextChars: 6000,
-  defaultChatSite: 'gemini',
+  defaultChatSite: 'deepseek',
   externalModelOrder: [],
   externalModelsById: {},
 }
@@ -150,7 +150,7 @@ function normalizeStore(raw: unknown): OpenTeamStore {
     messageHighlightsById: readHighlightsRecord(raw.messageHighlightsById),
     externalRoleMemoriesById: readExternalRoleMemoryRecord(raw.externalRoleMemoriesById),
     externalChatMemoriesById: readExternalChatMemoryRecord(raw.externalChatMemoriesById),
-    settings: normalizeSettings(raw.settings),
+    settings: normalizeSettings(raw.settings, storedVersion),
     viewState: normalizeViewState(raw.viewState),
   }
 
@@ -160,6 +160,9 @@ function normalizeStore(raw: unknown): OpenTeamStore {
 
   if (shouldSeedDefaultCustomTemplates(storedVersion, normalized)) {
     seedDefaultCustomTemplates(normalized)
+  }
+  if (shouldMigrateDefaultCustomTemplateSites(storedVersion)) {
+    migrateDefaultCustomTemplateSites(normalized)
   }
 
   return normalized
@@ -325,7 +328,7 @@ function normalizeMetaStore(raw: unknown): OpenTeamMetaStore {
     messageHighlightsById: readHighlightsRecord(raw.messageHighlightsById),
     externalRoleMemoriesById: readExternalRoleMemoryRecord(raw.externalRoleMemoriesById),
     externalChatMemoriesById: readExternalChatMemoryRecord(raw.externalChatMemoriesById),
-    settings: normalizeSettings(raw.settings),
+    settings: normalizeSettings(raw.settings, typeof raw.version === 'number' ? raw.version : 0),
     viewState: normalizeViewState(raw.viewState),
   }
 
@@ -539,6 +542,19 @@ function shouldSeedDefaultCustomTemplates(storedVersion: number, store: OpenTeam
   return storedVersion < CURRENT_STORE_VERSION && store.roleTemplateOrder.length === 0 && Object.keys(store.roleTemplatesById).length === 0
 }
 
+function shouldMigrateDefaultCustomTemplateSites(storedVersion: number): boolean {
+  return storedVersion < 6
+}
+
+function migrateDefaultCustomTemplateSites(store: OpenTeamStore): void {
+  for (const template of DEFAULT_CUSTOM_ROLE_TEMPLATES) {
+    const storedTemplate = store.roleTemplatesById[template.id]
+    if (storedTemplate?.type === 'custom' && storedTemplate.defaultChatSite === 'gemini') {
+      storedTemplate.defaultChatSite = 'deepseek'
+    }
+  }
+}
+
 function seedDefaultCustomTemplates(store: OpenTeamStore): void {
   store.roleTemplateOrder = defaultCustomRoleTemplateOrder()
   store.roleTemplatesById = defaultCustomRoleTemplatesById()
@@ -579,26 +595,24 @@ export function messageChunkStorageKey(chatId: string, chunkId: string): string 
   return `${MESSAGE_CHUNK_KEY_PREFIX}${chatId}.${chunkId}`
 }
 
-function normalizeSettings(raw: unknown): OpenTeamSettings {
+function normalizeSettings(raw: unknown, storedVersion = CURRENT_STORE_VERSION): OpenTeamSettings {
   if (!isRecord(raw)) {
     return { ...DEFAULT_SETTINGS }
   }
 
   const externalModelsById = normalizeExternalModelRecord(raw.externalModelsById)
+  const defaultChatSite = readSettingsChatSite(raw.defaultChatSite)
   return {
     defaultMode: raw.defaultMode === 'collaborative' ? 'collaborative' : DEFAULT_SETTINGS.defaultMode,
     maxContextChars: typeof raw.maxContextChars === 'number' ? raw.maxContextChars : DEFAULT_SETTINGS.maxContextChars,
-    defaultChatSite:
-      raw.defaultChatSite === 'chatgpt'
-        ? 'chatgpt'
-        : raw.defaultChatSite === 'claude'
-          ? 'claude'
-          : raw.defaultChatSite === 'deepseek'
-            ? 'deepseek'
-            : DEFAULT_SETTINGS.defaultChatSite,
+    defaultChatSite: storedVersion < 6 && defaultChatSite === 'gemini' ? DEFAULT_SETTINGS.defaultChatSite : defaultChatSite,
     externalModelOrder: normalizeExternalModelOrder(raw.externalModelOrder, externalModelsById),
     externalModelsById,
   }
+}
+
+function readSettingsChatSite(raw: unknown): OpenTeamSettings['defaultChatSite'] {
+  return raw === 'gemini' || raw === 'chatgpt' || raw === 'claude' || raw === 'deepseek' ? raw : DEFAULT_SETTINGS.defaultChatSite
 }
 
 function normalizeExternalModelRecord(raw: unknown): Record<string, ExternalModelConfig> {

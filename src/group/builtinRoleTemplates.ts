@@ -606,7 +606,7 @@ function builtin(input: BuiltinTemplateInput): RoleTemplate {
     type: 'builtin',
     name: input.name,
     description: input.description,
-    defaultChatSite: 'gemini',
+    defaultChatSite: 'deepseek',
     systemPrompt: `${COMMON_PERSONA_BASE}\n\n${input.prompt.trim()}`,
     createdAt: BUILTIN_TIMESTAMP,
     updatedAt: BUILTIN_TIMESTAMP,

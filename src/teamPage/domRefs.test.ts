@@ -6,6 +6,7 @@ describe('team page dom refs', () => {
   it('collects required team page elements and fails clearly when a selector is missing', async () => {
     document.body.innerHTML = `
       <main id="app"><div id="iframe-host"></div></main>
+      <button id="close-window"></button>
       <button id="toggle-window-size"></button>
       <button id="toggle-fullscreen"></button>
       <section id="store-summary"></section>
@@ -148,6 +149,7 @@ describe('team page dom refs', () => {
     const refs = createTeamPageDomRefs()
 
     expect(refs.appShellEl.id).toBe('app')
+    expect(refs.closeWindowEl.id).toBe('close-window')
     expect(refs.toggleFullscreenEl.id).toBe('toggle-fullscreen')
     expect(refs.openOrchestrationEl.id).toBe('open-orchestration')
     expect(refs.autoOrchestrationEl.id).toBe('auto-orchestration')

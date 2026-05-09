@@ -69,7 +69,7 @@ describe('group store', () => {
       settings: {
         defaultMode: 'independent',
         maxContextChars: 6000,
-        defaultChatSite: 'gemini',
+        defaultChatSite: 'deepseek',
         externalModelOrder: [],
         externalModelsById: {},
       },
@@ -82,6 +82,14 @@ describe('group store', () => {
 
   it('loads a default store when storage is empty', async () => {
     await expect(loadStore()).resolves.toEqual(createDefaultStore())
+  })
+
+  it('seeds default custom role templates on DeepSeek', () => {
+    expect(DEFAULT_CUSTOM_ROLE_TEMPLATES.map(template => template.defaultChatSite)).toEqual(['deepseek', 'deepseek', 'deepseek'])
+  })
+
+  it('uses DeepSeek as the default site for built-in role templates', () => {
+    expect(new Set(BUILTIN_ROLE_TEMPLATES.map(template => template.defaultChatSite))).toEqual(new Set(['deepseek']))
   })
 
   it('merges missing keys with defaults when loading stored data', async () => {
@@ -103,7 +111,7 @@ describe('group store', () => {
       },
       settings: {
         defaultMode: 'collaborative',
-        defaultChatSite: 'gemini',
+        defaultChatSite: 'deepseek',
       },
     }
 
@@ -118,7 +126,7 @@ describe('group store', () => {
       settings: {
         defaultMode: 'collaborative',
         maxContextChars: 6000,
-        defaultChatSite: 'gemini',
+        defaultChatSite: 'deepseek',
         externalModelOrder: [],
         externalModelsById: {},
       },
@@ -164,6 +172,43 @@ describe('group store', () => {
       roleTemplateOrder: [],
       roleTemplatesById: {},
     })
+  })
+
+  it('preserves an explicitly saved Gemini default site on current stores', async () => {
+    stored[META_STORE_KEY] = {
+      version: CURRENT_STORE_VERSION,
+      chatOrder: [],
+      roleTemplateOrder: [],
+      roleTemplatesById: {},
+      settings: {
+        defaultMode: 'independent',
+        defaultChatSite: 'gemini',
+      },
+    }
+
+    await expect(loadStore()).resolves.toMatchObject({
+      settings: {
+        defaultChatSite: 'gemini',
+      },
+    })
+  })
+
+  it('migrates legacy default custom role template sites to DeepSeek', async () => {
+    stored[META_STORE_KEY] = {
+      version: CURRENT_STORE_VERSION - 1,
+      chatOrder: [],
+      roleTemplateOrder: DEFAULT_CUSTOM_ROLE_TEMPLATES.map(template => template.id),
+      roleTemplatesById: Object.fromEntries(DEFAULT_CUSTOM_ROLE_TEMPLATES.map(template => [template.id, { ...template, defaultChatSite: 'gemini' }])),
+      settings: {
+        defaultMode: 'independent',
+        defaultChatSite: 'gemini',
+      },
+    }
+
+    const store = await loadStore()
+
+    expect(store.settings.defaultChatSite).toBe('deepseek')
+    expect(DEFAULT_CUSTOM_ROLE_TEMPLATES.map(template => store.roleTemplatesById[template.id]?.defaultChatSite)).toEqual(['deepseek', 'deepseek', 'deepseek'])
   })
 
   it('normalizes external model settings and drops incomplete configs', async () => {

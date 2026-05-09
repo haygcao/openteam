@@ -26,7 +26,7 @@
     </section>
     <div id="app" class="app-shell" hidden>
       <div id="floating-toolbar" class="floating-toolbar">
-        <button id="close-window" class="icon-btn window-dot window-dot-close" type="button" aria-label="关闭窗口" title="关闭窗口">×</button>
+        <button id="close-window" class="icon-btn window-dot window-dot-close" type="button" aria-label="缩小窗口" title="缩小窗口">×</button>
         <button id="toggle-window-size" class="icon-btn window-dot window-dot-minimize" type="button" aria-expanded="true" aria-label="缩小窗口" title="缩小窗口">−</button>
         <button id="toggle-fullscreen" class="icon-btn window-dot window-dot-fullscreen" type="button" aria-pressed="false" aria-label="全屏窗口" title="全屏窗口">⛶</button>
       </div>
@@ -359,7 +359,7 @@
             <label>默认站点</label>
             <div class="site-segmented">
               <label class="site-segment" for="template-site-gemini">
-                <input id="template-site-gemini" type="radio" name="template-chat-site" value="gemini" checked />
+                <input id="template-site-gemini" type="radio" name="template-chat-site" value="gemini" />
                 <span>Gemini</span>
               </label>
               <label class="site-segment" for="template-site-chatgpt">
@@ -371,7 +371,7 @@
                 <span>Claude</span>
               </label>
               <label class="site-segment" for="template-site-deepseek">
-                <input id="template-site-deepseek" type="radio" name="template-chat-site" value="deepseek" />
+                <input id="template-site-deepseek" type="radio" name="template-chat-site" value="deepseek" checked />
                 <span>DeepSeek</span>
               </label>
               <label class="site-segment" for="template-site-external">

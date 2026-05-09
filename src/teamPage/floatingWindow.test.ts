@@ -71,6 +71,28 @@ describe('team page floating window boundary', () => {
     expect(toggleFullscreenEl.getAttribute('aria-pressed')).toBe('false')
   })
 
+  it('minimizes the whole floating shell from the top-right close affordance', () => {
+    const appShellEl = document.createElement('main')
+    const closeWindowEl = document.createElement('button')
+    const toggleWindowSizeEl = document.createElement('button')
+    const toggleFullscreenEl = document.createElement('button')
+    const windowLauncherEl = document.createElement('button')
+
+    createFloatingWindowControls({
+      appShellEl,
+      closeWindowEl,
+      toggleWindowSizeEl,
+      toggleFullscreenEl,
+      windowLauncherEl,
+    }).registerFloatingWindowControls()
+
+    closeWindowEl.click()
+
+    expect(appShellEl.classList.contains('minimized')).toBe(true)
+    expect(windowLauncherEl.hidden).toBe(false)
+    expect(toggleWindowSizeEl.getAttribute('aria-expanded')).toBe('false')
+  })
+
   it('drags the window from the top chrome without a dedicated drag handle', () => {
     const appShellEl = document.createElement('main')
     const toggleWindowSizeEl = document.createElement('button')

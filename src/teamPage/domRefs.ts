@@ -1,5 +1,6 @@
 export interface TeamPageDomRefs {
   appShellEl: HTMLElement
+  closeWindowEl: HTMLButtonElement
   toggleWindowSizeEl: HTMLButtonElement
   toggleFullscreenEl: HTMLButtonElement
   storeSummaryEl: HTMLElement
@@ -148,6 +149,7 @@ export function requireElement<T extends Element>(selector: string): T {
 export function createTeamPageDomRefs(): TeamPageDomRefs {
   return {
     appShellEl: requireElement<HTMLElement>('#app'),
+    closeWindowEl: requireElement<HTMLButtonElement>('#close-window'),
     toggleWindowSizeEl: requireElement<HTMLButtonElement>('#toggle-window-size'),
     toggleFullscreenEl: requireElement<HTMLButtonElement>('#toggle-fullscreen'),
     storeSummaryEl: requireElement<HTMLElement>('#store-summary'),

@@ -139,9 +139,9 @@ body:not(.access-locked) #invite-gate {
 }
 
 .app-shell.fullscreen .floating-toolbar {
-  left: 18px;
-  right: auto;
-  top: 16px;
+  left: auto;
+  right: 18px;
+  top: 6px;
 }
 
 .app-shell.fullscreen .message-inner {
@@ -180,16 +180,17 @@ body:not(.access-locked) #invite-gate {
 
 .floating-toolbar {
   position: absolute;
-  left: 18px;
-  right: auto;
-  top: 22px;
+  left: auto;
+  right: 18px;
+  top: 6px;
   z-index: 12;
   display: flex;
+  flex-direction: row-reverse;
   align-items: center;
   justify-content: flex-end;
   gap: 6px;
   width: auto;
-  height: 28px;
+  height: 11px;
   border: 0;
   padding: 0;
   background: transparent;
@@ -244,6 +245,10 @@ body:not(.access-locked) #invite-gate {
 
 .window-dot-close::before {
   content: "×";
+}
+
+.floating-toolbar .window-dot-close::before {
+  color: rgba(22, 24, 28, 0.68);
 }
 
 .floating-toolbar .icon-btn.window-dot-minimize {
