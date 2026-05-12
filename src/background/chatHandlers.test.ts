@@ -52,4 +52,67 @@ describe('background chat handlers', () => {
     expect(draftStore?.currentChatId).toBe('chat-1')
     expect(broadcastStoreUpdated).toHaveBeenCalledWith(expect.objectContaining({ currentChatId: 'chat-1' }))
   })
+
+  it('creates a chat with the people supplied by a group template', async () => {
+    vi.resetModules()
+    const { BUILTIN_GROUP_TEMPLATES } = await import('../group/builtinGroupTemplates')
+    const template = BUILTIN_GROUP_TEMPLATES[0]
+    let draftStore: OpenTeamStore | undefined
+    vi.doMock('./storeAccess', async importOriginal => {
+      const actual = await importOriginal<typeof import('./storeAccess')>()
+      return {
+        ...actual,
+        mutateStore: vi.fn(async (mutator: (store: OpenTeamStore) => unknown) => {
+          const store = createDefaultStore()
+          const result = await mutator(store)
+          draftStore = store
+          return { store, result }
+        }),
+      }
+    })
+
+    const idCounters: Record<string, number> = {}
+    const { createChatHandlers } = await import('./chatHandlers')
+    const routes = createChatHandlers({
+      broadcastStoreUpdated: vi.fn(),
+      getChatStatusFromRoles: () => 'ready',
+      log: { info: vi.fn(), warn: vi.fn() },
+      newId: vi.fn((prefix: string) => {
+        idCounters[prefix] = (idCounters[prefix] ?? 0) + 1
+        return `${prefix}-${idCounters[prefix]}`
+      }),
+      now: vi.fn(() => 100),
+      runtimeFrames: { removeRole: vi.fn() },
+    })
+
+    const createRoute = routes.find(route => route.type === 'GROUP_CHAT_CREATE')
+    const response = await createRoute?.handler({
+      type: 'GROUP_CHAT_CREATE',
+      name: template.defaultChatName,
+      mode: template.defaultMode,
+      roles: template.roles,
+    }, {})
+
+    expect(response).toMatchObject({
+      ok: true,
+      chat: {
+        id: 'chat-1',
+        name: template.defaultChatName,
+        mode: template.defaultMode,
+        status: 'initializing',
+      },
+    })
+    expect(draftStore?.chatsById['chat-1'].roleIds).toHaveLength(template.roles.length)
+    expect(Object.values(draftStore?.rolesById ?? {}).map(role => ({
+      name: role.name,
+      description: role.description,
+      systemPrompt: role.systemPrompt,
+      chatSite: role.chatSite,
+    }))).toEqual(template.roles.map(role => ({
+      name: role.name,
+      description: role.description,
+      systemPrompt: role.systemPrompt,
+      chatSite: 'deepseek',
+    })))
+  })
 })

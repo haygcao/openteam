@@ -114,6 +114,9 @@
             <button id="cancel-create-chat" class="btn" type="button">取消</button>
             <button class="btn btn-primary" type="submit">创建</button>
           </div>
+          <div class="chat-create-template-row">
+            <button id="open-group-template-create" class="btn btn-ghost chat-create-template-btn" type="button">从模板中创建</button>
+          </div>
         </form>
 
         <div id="chat-list" class="chat-list"></div>
@@ -254,6 +257,22 @@
             </div>
             <div id="all-notes-editor" class="notes-editor all-notes-editor" aria-label="当前笔记富文本编辑器"></div>
           </section>
+        </div>
+      </section>
+    </div>
+
+    <div id="group-template-modal" class="modal-backdrop" hidden>
+      <section class="modal group-template-modal" role="dialog" aria-modal="true" aria-labelledby="group-template-title">
+        <div class="modal-header">
+          <div>
+            <h2 id="group-template-title">从模板中创建</h2>
+            <p class="tiny">选择一个现成小组，创建后会自动加入模板人员。</p>
+          </div>
+          <button id="close-group-template-modal" class="icon-btn modal-close" type="button" aria-label="关闭群聊模板">×</button>
+        </div>
+        <div id="group-template-list" class="group-template-list" aria-label="群聊模板"></div>
+        <div class="group-template-footer">
+          <button id="confirm-group-template-create" class="btn btn-primary" type="button" disabled>确认创建</button>
         </div>
       </section>
     </div>

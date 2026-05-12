@@ -132,6 +132,20 @@ describe('team.html chat creation UI', () => {
     expect(modeOptions).not.toMatch(/id="new-chat-mode-independent"[^>]*checked/)
   })
 
+  it('offers group template creation below the normal new chat form', () => {
+    const html = readTeamDocument()
+    const createForm = html.match(/<form id="create-chat-form"[\s\S]*?<\/form>/)?.[0] ?? ''
+
+    expect(createForm).toContain('id="open-group-template-create"')
+    expect(createForm.indexOf('class="two-col"')).toBeLessThan(createForm.indexOf('id="open-group-template-create"'))
+    expect(html).toContain('id="group-template-modal"')
+    expect(html).toContain('id="group-template-list"')
+    expect(html).toContain('id="confirm-group-template-create"')
+    expect(html).toContain('从模板中创建')
+    expect(html).toMatch(/\.group-template-option\s*{/s)
+    expect(html).toMatch(/\.group-template-option\.active\s*{/s)
+  })
+
   it('includes the people-library workflows, right drawer, iframe host, and minimized launcher', () => {
     const html = readTeamDocument()
 

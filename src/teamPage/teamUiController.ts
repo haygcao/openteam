@@ -1,4 +1,5 @@
 import { getDefaultChatSiteUrl } from '../group/conversationUrl'
+import { BUILTIN_GROUP_TEMPLATES, getBuiltinGroupTemplate, type BuiltinGroupTemplate } from '../group/builtinGroupTemplates'
 import type { ChatSite, GroupChat, GroupRole, RoomMode } from '../group/types'
 import type { TeamPageState } from './appState'
 import { requireElement } from './domRefs'
@@ -43,7 +44,15 @@ export interface TeamUiController {
 }
 
 export function createTeamUiController(deps: TeamUiControllerDependencies): TeamUiController {
+  let selectedGroupTemplateId: string | undefined
+
   function registerUi(): void {
+    const openGroupTemplateCreateEl = requireElement<HTMLButtonElement>('#open-group-template-create')
+    const groupTemplateModalEl = requireElement<HTMLElement>('#group-template-modal')
+    const groupTemplateListEl = requireElement<HTMLElement>('#group-template-list')
+    const confirmGroupTemplateCreateEl = requireElement<HTMLButtonElement>('#confirm-group-template-create')
+    const closeGroupTemplateModalEl = requireElement<HTMLButtonElement>('#close-group-template-modal')
+
     deps.quickCreateChatEl.addEventListener('click', () => {
       setChatCreatePopoverVisible(deps.createChatFormEl.hidden)
     })
@@ -102,12 +111,34 @@ export function createTeamUiController(deps: TeamUiControllerDependencies): Team
       deps.state.chatMenuChatId = undefined
       deps.state.roleSiteMenuRoleId = undefined
       deps.state.roleActionMenuRoleId = undefined
+      closeGroupTemplateModal(groupTemplateModalEl, groupTemplateListEl, confirmGroupTemplateCreateEl)
       deps.renderChatList()
       deps.renderRolePanel()
     })
 
     requireElement<HTMLButtonElement>('#cancel-create-chat').addEventListener('click', () => {
       setChatCreatePopoverVisible(false)
+    })
+
+    openGroupTemplateCreateEl.addEventListener('click', () => {
+      openGroupTemplateModal(groupTemplateModalEl, groupTemplateListEl, confirmGroupTemplateCreateEl)
+    })
+
+    closeGroupTemplateModalEl.addEventListener('click', () => {
+      closeGroupTemplateModal(groupTemplateModalEl, groupTemplateListEl, confirmGroupTemplateCreateEl)
+    })
+
+    confirmGroupTemplateCreateEl.addEventListener('click', () => {
+      const template = selectedGroupTemplateId ? getBuiltinGroupTemplate(selectedGroupTemplateId) : undefined
+      if (!template) return
+      deps.newChatNameEl.value = ''
+      closeGroupTemplateModal(groupTemplateModalEl, groupTemplateListEl, confirmGroupTemplateCreateEl)
+      setChatCreatePopoverVisible(false)
+      deps.runCommand('GROUP_CHAT_CREATE', {
+        name: template.defaultChatName,
+        mode: template.defaultMode,
+        roles: template.roles,
+      }).catch(error => deps.showError(error instanceof Error ? error.message : String(error)))
     })
 
     deps.createChatFormEl.addEventListener('submit', event => {
@@ -135,6 +166,78 @@ export function createTeamUiController(deps: TeamUiControllerDependencies): Team
     requireElement<HTMLButtonElement>('#open-gemini-login').addEventListener('click', () => {
       chrome.tabs.create({ url: getDefaultChatSiteUrl(deps.getSelectedLoginSite()) }).catch(error => deps.showError(error instanceof Error ? error.message : String(error)))
     })
+  }
+
+  function openGroupTemplateModal(
+    modalEl: HTMLElement,
+    listEl: HTMLElement,
+    confirmButton: HTMLButtonElement,
+  ): void {
+    selectedGroupTemplateId = undefined
+    confirmButton.disabled = true
+    renderGroupTemplateList(listEl, confirmButton)
+    modalEl.hidden = false
+    listEl.querySelector<HTMLButtonElement>('.group-template-option')?.focus()
+  }
+
+  function closeGroupTemplateModal(
+    modalEl: HTMLElement,
+    listEl: HTMLElement,
+    confirmButton: HTMLButtonElement,
+  ): void {
+    modalEl.hidden = true
+    selectedGroupTemplateId = undefined
+    confirmButton.disabled = true
+    listEl.replaceChildren()
+  }
+
+  function renderGroupTemplateList(listEl: HTMLElement, confirmButton: HTMLButtonElement): void {
+    listEl.replaceChildren()
+    for (const template of BUILTIN_GROUP_TEMPLATES) {
+      listEl.append(groupTemplateOption(template, listEl, confirmButton))
+    }
+  }
+
+  function groupTemplateOption(
+    template: BuiltinGroupTemplate,
+    listEl: HTMLElement,
+    confirmButton: HTMLButtonElement,
+  ): HTMLButtonElement {
+    const button = document.createElement('button')
+    button.type = 'button'
+    button.className = `group-template-option${selectedGroupTemplateId === template.id ? ' active' : ''}`
+    button.dataset.templateId = template.id
+    button.setAttribute('aria-pressed', String(selectedGroupTemplateId === template.id))
+    button.addEventListener('click', () => {
+      selectedGroupTemplateId = template.id
+      confirmButton.disabled = false
+      renderGroupTemplateList(listEl, confirmButton)
+      listEl.querySelector<HTMLButtonElement>(`[data-template-id="${template.id}"]`)?.focus()
+    })
+
+    const top = document.createElement('span')
+    top.className = 'group-template-option-top'
+    const name = document.createElement('strong')
+    name.textContent = template.name
+    const category = document.createElement('span')
+    category.className = 'group-template-category'
+    category.textContent = template.category
+    top.append(name, category)
+
+    const summary = document.createElement('span')
+    summary.className = 'group-template-summary'
+    summary.textContent = template.summary
+
+    const roles = document.createElement('span')
+    roles.className = 'group-template-roles'
+    for (const role of template.roles) {
+      const chip = document.createElement('span')
+      chip.textContent = role.name
+      roles.append(chip)
+    }
+
+    button.append(top, summary, roles)
+    return button
   }
 
   function readNewChatMode(): RoomMode {
