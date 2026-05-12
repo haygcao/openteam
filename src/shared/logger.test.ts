@@ -6,7 +6,7 @@ describe('createLogger', () => {
     vi.restoreAllMocks()
   })
 
-  it('suppresses debug and info logs when debug logging is disabled', () => {
+  it('suppresses all console logs when debug logging is disabled', () => {
     const debug = vi.spyOn(console, 'debug').mockImplementation(() => undefined)
     const info = vi.spyOn(console, 'info').mockImplementation(() => undefined)
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
@@ -14,11 +14,11 @@ describe('createLogger', () => {
 
     logger.debug('hidden-debug', { chatId: 'chat-1' })
     logger.info('hidden-info', { roleId: 'role-1' })
-    logger.warn('visible-warn', { messageId: 'msg-1' })
+    logger.warn('hidden-warn', { messageId: 'msg-1' })
 
     expect(debug).not.toHaveBeenCalled()
     expect(info).not.toHaveBeenCalled()
-    expect(warn).toHaveBeenCalledWith('[OpenTeam][test] visible-warn', { messageId: 'msg-1' })
+    expect(warn).not.toHaveBeenCalled()
   })
 
   it('merges child context into emitted details', () => {
@@ -32,5 +32,28 @@ describe('createLogger', () => {
       roleId: 'role-1',
       messageId: 'msg-1',
     })
+  })
+
+  it('keeps production error logs off the console', () => {
+    const error = vi.spyOn(console, 'error').mockImplementation(() => undefined)
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+    const logger = createLogger('test', {}, { debugEnabled: false })
+
+    logger.error('hidden-runtime-error', { message: 'failed' })
+
+    expect(error).not.toHaveBeenCalled()
+    expect(warn).not.toHaveBeenCalled()
+  })
+
+  it('emits warnings and errors when debug logging is enabled', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+    const error = vi.spyOn(console, 'error').mockImplementation(() => undefined)
+    const logger = createLogger('test', {}, { debugEnabled: true })
+
+    logger.warn('visible-warn', { warning: true })
+    logger.error('visible-error', { error: true })
+
+    expect(warn).toHaveBeenCalledWith('[OpenTeam][test] visible-warn', { warning: true })
+    expect(error).toHaveBeenCalledWith('[OpenTeam][test] visible-error', { error: true })
   })
 })

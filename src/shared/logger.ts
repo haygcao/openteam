@@ -20,7 +20,7 @@ export function createLogger(scope: string, baseContext: LogDetails = {}, option
   const shouldEmitVerbose = () => options.debugEnabled ?? isDebugLoggingEnabled()
 
   const emit = (level: ConsoleLevel, event: string, details: LogDetails = {}): void => {
-    if ((level === 'debug' || level === 'info') && !shouldEmitVerbose()) return
+    if (!shouldEmitVerbose()) return
 
     const payload = { ...baseContext, ...details }
     console[level](`[OpenTeam][${scope}] ${event}`, payload)

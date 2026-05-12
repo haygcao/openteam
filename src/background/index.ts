@@ -83,6 +83,24 @@ function readOptionalString(value: unknown): string | undefined {
   return typeof value === 'string' ? value.trim() || undefined : undefined
 }
 
+function errorReason(error: unknown): string {
+  if (error instanceof Error) return error.message
+  const reason = String(error)
+  return reason.trim() || 'Unknown OpenTeam background error'
+}
+
+function logBackgroundFailure(event: string, error: unknown, details: Record<string, unknown> = {}): void {
+  log.warn(event, { ...details, error: errorReason(error) })
+}
+
+function sendResponseSafely(sendResponse: (response?: unknown) => void, response: unknown): void {
+  try {
+    sendResponse(response)
+  } catch (error) {
+    logBackgroundFailure('message-response:failed', error)
+  }
+}
+
 const routeMessage = createMessageRouter([
   { type: 'GROUP_STORE_GET', handler: handleStoreGet },
   ...createChatHandlers({ broadcastStoreUpdated, getChatStatusFromRoles, log, newId, now, runtimeFrames }),
@@ -94,47 +112,67 @@ const routeMessage = createMessageRouter([
 ])
 
 chrome.runtime.onInstalled.addListener(() => {
-  log.info('extension-installed')
+  try {
+    log.info('extension-installed')
+  } catch (error) {
+    logBackgroundFailure('extension-installed:failed', error)
+  }
 })
 
 chrome.runtime.onMessage.addListener((message: RuntimeMessage, sender, sendResponse) => {
-  if (message?.type === 'OPENTEAM_PING') {
-    sendResponse({ ok: true, tabId: sender.tab?.id ?? null })
-    return true
-  }
+  try {
+    if (message?.type === 'OPENTEAM_PING') {
+      sendResponseSafely(sendResponse, { ok: true, tabId: sender.tab?.id ?? null })
+      return true
+    }
 
-  Promise.resolve(routeMessage(message, sender))
-    .then(sendResponse)
-    .catch((error: unknown) => {
-      const reason = error instanceof Error ? error.message : String(error)
-      log.error('message-handler:failed', { type: message?.type, error: reason })
-      sendError(reason).catch(() => undefined)
-      sendResponse({ ok: false, error: reason })
-    })
+    Promise.resolve()
+      .then(() => routeMessage(message, sender))
+      .then(response => sendResponseSafely(sendResponse, response))
+      .catch((error: unknown) => {
+        const reason = errorReason(error)
+        log.warn('message-handler:failed', { type: message?.type, error: reason })
+        sendError(reason).catch(() => undefined)
+        sendResponseSafely(sendResponse, { ok: false, error: reason })
+      })
+  } catch (error) {
+    const reason = errorReason(error)
+    logBackgroundFailure('message-listener:failed', error, { type: message?.type })
+    sendError(reason).catch(() => undefined)
+    sendResponseSafely(sendResponse, { ok: false, error: reason })
+  }
 
   return true
 })
 
 chrome.action.onClicked.addListener(() => {
-  chrome.tabs.create({ url: chrome.runtime.getURL('team.html'), active: true }).catch(error => {
-    log.warn('open-team-page:failed', { error: error instanceof Error ? error.message : String(error) })
-  })
+  try {
+    chrome.tabs.create({ url: chrome.runtime.getURL('team.html'), active: true }).catch(error => {
+      logBackgroundFailure('open-team-page:failed', error)
+    })
+  } catch (error) {
+    logBackgroundFailure('open-team-page:failed', error)
+  }
 })
 
 chrome.tabs.onRemoved.addListener(tabId => {
-  forgetHostTab(tabId)
-  const removed = runtimeFrames.removeTab(tabId)
-  if (removed.length === 0) return
+  try {
+    forgetHostTab(tabId)
+    const removed = runtimeFrames.removeTab(tabId)
+    if (removed.length === 0) return
 
-  mutateStore(store => {
-    const timestamp = now()
-    for (const binding of removed) {
-      const role = store.rolesById[binding.roleId]
-      if (!role || role.chatId !== binding.chatId || role.status === 'thinking') continue
-      role.status = 'loading'
-      role.updatedAt = timestamp
-    }
-  })
-    .then(({ store }) => broadcastStoreUpdated(store))
-    .catch(error => log.warn('tab-removed:update-failed', { tabId, error: error instanceof Error ? error.message : String(error) }))
+    mutateStore(store => {
+      const timestamp = now()
+      for (const binding of removed) {
+        const role = store.rolesById[binding.roleId]
+        if (!role || role.chatId !== binding.chatId || role.status === 'thinking') continue
+        role.status = 'loading'
+        role.updatedAt = timestamp
+      }
+    })
+      .then(({ store }) => broadcastStoreUpdated(store))
+      .catch(error => logBackgroundFailure('tab-removed:update-failed', error, { tabId }))
+  } catch (error) {
+    logBackgroundFailure('tab-removed:failed', error, { tabId })
+  }
 })
