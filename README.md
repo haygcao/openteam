@@ -8,6 +8,14 @@ OpenTeam is a Manifest V3 Chrome extension. It does not require model API keys a
 
 Use it for learning, research, and personal non-commercial experiments where one answer is not enough: product reviews, technical design reviews, content planning, personal decisions, multi-model comparison, and multi-step work that benefits from several AI roles thinking together.
 
+## 🌱 Background
+
+OpenTeam is a sister project to [OpenLink](https://github.com/afumu/openlink), an earlier browser extension I built around using the browser itself as the working surface. While building OpenLink, I already wanted a companion extension that could reuse signed-in browser sessions to talk with large language models and compare answers across models, but that idea stayed on the shelf while other work got busy.
+
+The idea became concrete after I met Lu ([YUANLU007](https://github.com/YUANLU007)), a news editor. In her writing workflow, she often needs to compare several AI systems, inspect how different models answer the same question, and use multiple perspectives for factual checks. That matched the original OpenLink idea closely, so OpenTeam became its sister project: a local browser workspace for sending one task to multiple AI web sessions and gathering their responses in one discussion room.
+
+If you write, edit, research, review facts, compare models, compare role perspectives, or want browser-based workflow-style AI collaboration, OpenTeam is built for that kind of work.
+
 ![OpenTeam group chat preview](docs/assets/group-chat-ui-concept.png)
 
 ## ✨ Highlights

@@ -8,6 +8,14 @@ OpenTeam 是一个 Manifest V3 Chrome 扩展。它不要求你配置模型 API K
 
 它适合用于学习、研究和个人非商用实验，处理需要多视角判断的问题：产品评审、技术方案审查、内容创作、个人决策、多模型对比，以及需要多个 AI 角色协作完成的连续任务。
 
+## 🌱 项目背景
+
+OpenTeam 可以看作 [OpenLink](https://github.com/afumu/openlink) 的姊妹篇。之前我做 OpenLink 时，就想过做一个能复用浏览器会话、直接和多个大模型网页对话与讨论的插件，只是后来一直忙，没有真正做出来。
+
+后来我认识了陆同学（[YUANLU007](https://github.com/YUANLU007)）。她做新闻编辑，在写稿过程中经常需要同时利用多个 AI：对比不同模型的回答效果，也用它们辅助做新闻事实性校验。这个需求和我之前的想法一拍即合，于是就有了 OpenTeam。
+
+如果你是文字工作者，或者经常需要多模型对比、多角色视角对比，想在浏览器里跑一套工作流式的 AI 协作，OpenTeam 就是为这种场景准备的。
+
 ![OpenTeam 群聊预览](docs/assets/group-chat-ui-concept.png)
 
 ## ✨ 核心亮点
