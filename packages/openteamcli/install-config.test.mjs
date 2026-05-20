@@ -12,7 +12,7 @@ describe('openteamcli install configuration', () => {
     expect(rootPkg.private).toBe(true)
     expect(rootPkg.bin).toBeUndefined()
     expect(rootPkg.files).toBeUndefined()
-    expect(rootPkg.scripts.openteamcli).toBe('node packages/openteam-cli/openteamcli.mjs')
+    expect(rootPkg.scripts.openteamcli).toBe('node packages/openteamcli/openteamcli.mjs')
   })
 
   it('exposes openteamcli from a lightweight publishable package', () => {
@@ -43,6 +43,7 @@ describe('openteamcli install configuration', () => {
   it('documents the installed openteamcli command in the skill', () => {
     const skill = readFileSync(resolve(packageRoot, 'skills/SKILL.md'), 'utf8')
 
+    expect(skill).toContain('openteamcli daemon start')
     expect(skill).toContain('openteamcli doctor')
     expect(skill).not.toContain('npm run openteamcli --')
   })

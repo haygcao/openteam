@@ -8,7 +8,7 @@
     "service_worker": "background.js",
     "type": "module"
   },
-  "permissions": ["storage", "tabs", "declarativeNetRequest", "clipboardRead", "clipboardWrite"],
+  "permissions": ["storage", "tabs", "alarms", "declarativeNetRequest", "clipboardRead", "clipboardWrite"],
   "host_permissions": [
     "https://gemini.google.com/*",
     "https://*.gemini.google.com/*",

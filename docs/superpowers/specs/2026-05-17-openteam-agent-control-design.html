@@ -892,7 +892,7 @@ Content-Type: application/json</code></pre>
               <h2><code>openteamcli</code> 是智能体的主要入口</h2>
             </div>
           </div>
-          <p class="lead">命令行工具默认输出 JSON，方便智能体读取。CLI、本地守护进程和技能文档都放在轻量发布包 <code>packages/openteam-cli/</code> 里。开发期可以在该目录用 <code>npm install -g .</code> 或 <code>npm link</code> 安装；发布后用户可以用 <code>npm install -g @openteam/cli</code> 安装，然后 skill 和外部智能体直接调用 <code>openteamcli</code>。人类友好的表格输出可以后续再加。</p>
+          <p class="lead">命令行工具默认输出 JSON，方便智能体读取。CLI、本地守护进程和技能文档都放在轻量发布包 <code>packages/openteamcli/</code> 里。开发期可以在该目录用 <code>npm install -g .</code> 或 <code>npm link</code> 安装；发布后用户可以用 <code>npm install -g @openteam/cli</code> 安装，然后 skill 和外部智能体直接调用 <code>openteamcli</code>。人类友好的表格输出可以后续再加。</p>
           <div class="grid two">
             <div class="card">
               <h3>核心命令</h3>
@@ -1361,7 +1361,7 @@ agentControlPort: 19826</code></pre>
                 <li><code>task.wait</code></li>
                 <li><code>task.read</code></li>
                 <li><code>run.createAndPost</code></li>
-                <li><code>packages/openteam-cli/skills/SKILL.md</code> 技能文档</li>
+                <li><code>packages/openteamcli/skills/SKILL.md</code> 技能文档</li>
               </ul>
             </div>
             <div class="card accent-coral">
@@ -1423,7 +1423,7 @@ agentControlPort: 19826</code></pre>
             </div>
             <div class="phase">
               <h3>技能</h3>
-              <p>新增 <code>packages/openteam-cli/skills/SKILL.md</code> 技能文档，包含使用流程、schema、错误恢复和示例。</p>
+              <p>新增 <code>packages/openteamcli/skills/SKILL.md</code> 技能文档，包含使用流程、schema、错误恢复和示例。</p>
             </div>
           </div>
         </section>
@@ -1491,7 +1491,7 @@ npm run build</code></pre>
           <details open>
             <summary><code>openteamcli</code> 放在哪里？</summary>
             <div>
-              <p>命令行工具已拆到 <code>packages/openteam-cli</code>，作为轻量 npm 包发布；根项目只保留插件开发和验证脚本。</p>
+              <p>命令行工具已拆到 <code>packages/openteamcli</code>，作为轻量 npm 包发布；根项目只保留插件开发和验证脚本。</p>
             </div>
           </details>
           <details>

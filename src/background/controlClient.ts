@@ -30,12 +30,16 @@ export interface ControlClient {
   stop(): void
 }
 
-const RECONNECT_DELAY_MS = 2_000
+const DAEMON_PING_TIMEOUT_MS = 1_000
+const RECONNECT_BASE_DELAY_MS = 2_000
+const RECONNECT_MAX_DELAY_MS = 60_000
 
 export function createControlClient(deps: ControlClientDependencies): ControlClient {
   let socket: WebSocket | undefined
   let activeUrl: string | undefined
+  let connectInFlight: { url: string; promise: Promise<void> } | undefined
   let reconnectTimer: ReturnType<typeof globalThis.setTimeout> | undefined
+  let reconnectAttempts = 0
   let shouldReconnect = false
 
   diagnostic('info', 'createControlClient:created', {
@@ -74,19 +78,42 @@ export function createControlClient(deps: ControlClientDependencies): ControlCli
       return
     }
     closeSocket()
-    connect(url)
+    await connect(url)
   }
 
   function stop(): void {
     diagnostic('warn', 'stop', { activeUrl, readyState: socket?.readyState })
     shouldReconnect = false
+    reconnectAttempts = 0
     clearReconnect()
     closeSocket()
   }
 
-  function connect(url: string): void {
+  function connect(url: string): Promise<void> {
+    if (connectInFlight?.url === url) {
+      diagnostic('info', 'connect:already-in-flight', { activeUrl })
+      return connectInFlight.promise
+    }
+    const promise = connectAttempt(url).finally(() => {
+      if (connectInFlight?.promise === promise) connectInFlight = undefined
+    })
+    connectInFlight = { url, promise }
+    return promise
+  }
+
+  async function connectAttempt(url: string): Promise<void> {
     activeUrl = url
     diagnostic('info', 'connect:attempt', { url })
+    const daemonReachable = await probeDaemon(url)
+    if (!daemonReachable) {
+      diagnostic('warn', 'connect:ping-unavailable', { url })
+      scheduleReconnect()
+      return
+    }
+    if (!shouldReconnect || activeUrl !== url) {
+      diagnostic('warn', 'connect:aborted-after-ping', { url, activeUrl, shouldReconnect })
+      return
+    }
     try {
       socket = new WebSocket(url)
     } catch (error) {
@@ -103,6 +130,7 @@ export function createControlClient(deps: ControlClientDependencies): ControlCli
 
     socket.onopen = () => {
       deps.log.info('control-client:connected', { url })
+      reconnectAttempts = 0
       diagnostic('info', 'socket:open', { url, readyState: socket?.readyState })
       send({
         type: 'hello',
@@ -148,6 +176,34 @@ export function createControlClient(deps: ControlClientDependencies): ControlCli
     }
   }
 
+  async function probeDaemon(url: string): Promise<boolean> {
+    const pingUrl = controlDaemonPingUrl(url)
+    diagnostic('info', 'connect:ping-start', { pingUrl })
+    const controller = new AbortController()
+    const timeout = globalThis.setTimeout(() => controller.abort(), DAEMON_PING_TIMEOUT_MS)
+    try {
+      const response = await fetch(pingUrl, {
+        method: 'GET',
+        cache: 'no-store',
+        signal: controller.signal,
+      })
+      diagnostic(response.ok ? 'info' : 'warn', 'connect:ping-finished', {
+        pingUrl,
+        ok: response.ok,
+        status: response.status,
+      })
+      return response.ok
+    } catch (error) {
+      diagnostic('warn', 'connect:ping-failed', {
+        pingUrl,
+        error: error instanceof Error ? error.message : String(error),
+      })
+      return false
+    } finally {
+      globalThis.clearTimeout(timeout)
+    }
+  }
+
   async function handleSocketMessage(data: unknown): Promise<void> {
     const message = parseDaemonMessage(data)
     if (!message) {
@@ -173,12 +229,14 @@ export function createControlClient(deps: ControlClientDependencies): ControlCli
       diagnostic('info', 'reconnect:already-scheduled')
       return
     }
-    diagnostic('warn', 'reconnect:scheduled', { delayMs: RECONNECT_DELAY_MS, activeUrl })
+    const delayMs = Math.min(RECONNECT_BASE_DELAY_MS * 2 ** reconnectAttempts, RECONNECT_MAX_DELAY_MS)
+    reconnectAttempts += 1
+    diagnostic('warn', 'reconnect:scheduled', { delayMs, activeUrl, reconnectAttempts })
     reconnectTimer = deps.setTimer(() => {
       reconnectTimer = undefined
       diagnostic('info', 'reconnect:tick', { activeUrl })
       sync().catch(error => deps.log.warn('control-client:reconnect-failed', { error: error instanceof Error ? error.message : String(error) }))
-    }, RECONNECT_DELAY_MS)
+    }, delayMs)
   }
 
   function clearReconnect(): void {
@@ -222,6 +280,14 @@ function controlDaemonUrl(store: OpenTeamStore, profileId: string): string {
     ? store.settings.agentControlPort
     : OPENTEAM_CONTROL_DEFAULT_PORT
   return `ws://127.0.0.1:${port}/ext?profileId=${encodeURIComponent(profileId)}`
+}
+
+function controlDaemonPingUrl(socketUrl: string): string {
+  const url = new URL(socketUrl)
+  url.protocol = 'http:'
+  url.pathname = '/ping'
+  url.search = ''
+  return url.toString()
 }
 
 function parseDaemonMessage(data: unknown): DaemonControlMessage | undefined {

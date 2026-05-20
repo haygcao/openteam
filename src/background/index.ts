@@ -26,6 +26,8 @@ import { createControlClient } from './controlClient'
 
 const runtimeFrames = createRuntimeFrameRegistry()
 const log = createLogger('background')
+const CONTROL_KEEPALIVE_ALARM = 'openteam-control-keepalive'
+const CONTROL_KEEPALIVE_PERIOD_MINUTES = 0.4
 
 const sendPrompt = createPromptSender({ log })
 const promptDeliveryLimiter = createSitePromptDeliveryLimiter({ log })
@@ -156,12 +158,38 @@ const controlClient = createControlClient({
     globalThis.clearTimeout(timerId)
   },
 })
+let controlClientInitialized = false
 
 function syncControlClient(): Promise<void> {
   console.info('[OpenTeam][control] background:syncControlClient:start', {
     at: new Date().toISOString(),
   })
   return controlClient.sync()
+}
+
+function initializeControlClient(): void {
+  if (controlClientInitialized) return
+  controlClientInitialized = true
+  try {
+    chrome.alarms?.create?.(CONTROL_KEEPALIVE_ALARM, { periodInMinutes: CONTROL_KEEPALIVE_PERIOD_MINUTES })
+    console.info('[OpenTeam][control] background:keepalive-alarm:scheduled', {
+      at: new Date().toISOString(),
+      alarm: CONTROL_KEEPALIVE_ALARM,
+      periodInMinutes: CONTROL_KEEPALIVE_PERIOD_MINUTES,
+    })
+  } catch (error) {
+    logBackgroundFailure('control-client:keepalive-alarm-failed', error)
+  }
+  console.info('[OpenTeam][control] background:initial-sync:scheduled', {
+    at: new Date().toISOString(),
+  })
+  syncControlClient().catch(error => {
+    console.warn('[OpenTeam][control] background:initial-sync:failed', {
+      at: new Date().toISOString(),
+      error: errorReason(error),
+    })
+    log.warn('control-client:initial-sync-failed', { error: errorReason(error) })
+  })
 }
 
 function getExtensionVersion(): string {
@@ -183,9 +211,19 @@ async function openTeamPage(): Promise<void> {
 chrome.runtime.onInstalled.addListener(() => {
   try {
     log.info('extension-installed')
+    initializeControlClient()
   } catch (error) {
     logBackgroundFailure('extension-installed:failed', error)
   }
+})
+
+chrome.runtime.onStartup?.addListener(() => {
+  initializeControlClient()
+})
+
+chrome.alarms?.onAlarm?.addListener(alarm => {
+  if (alarm.name !== CONTROL_KEEPALIVE_ALARM) return
+  syncControlClient().catch(error => log.warn('control-client:keepalive-sync-failed', { error: errorReason(error) }))
 })
 
 chrome.runtime.onMessage.addListener((message: RuntimeMessage, sender, sendResponse) => {
@@ -246,13 +284,4 @@ chrome.tabs.onRemoved.addListener(tabId => {
   }
 })
 
-console.info('[OpenTeam][control] background:initial-sync:scheduled', {
-  at: new Date().toISOString(),
-})
-syncControlClient().catch(error => {
-  console.warn('[OpenTeam][control] background:initial-sync:failed', {
-    at: new Date().toISOString(),
-    error: errorReason(error),
-  })
-  log.warn('control-client:initial-sync-failed', { error: errorReason(error) })
-})
+initializeControlClient()

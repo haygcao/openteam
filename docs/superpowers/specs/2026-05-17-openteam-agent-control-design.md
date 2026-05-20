@@ -161,15 +161,15 @@ openteamcli
 CLI source layout:
 
 ```text
-packages/openteam-cli/openteamcli.mjs
-packages/openteam-cli/openteam-daemon.mjs
-packages/openteam-cli/skills/SKILL.md
+packages/openteamcli/openteamcli.mjs
+packages/openteamcli/openteam-daemon.mjs
+packages/openteamcli/skills/SKILL.md
 ```
 
 Development install:
 
 ```bash
-cd packages/openteam-cli
+cd packages/openteamcli
 npm install -g .
 # or
 npm link
@@ -355,7 +355,7 @@ openteam-control
 Skill file:
 
 ```text
-packages/openteam-cli/skills/SKILL.md
+packages/openteamcli/skills/SKILL.md
 ```
 
 Skill responsibility:
@@ -572,7 +572,7 @@ This improves `task.wait` and `task.read`. If we want a no-migration first versi
 
 ## Daemon Design
 
-The daemon should be a small Node process packaged with `openteamcli` under `packages/openteam-cli/openteam-daemon.mjs`.
+The daemon should be a small Node process packaged with `openteamcli` under `packages/openteamcli/openteam-daemon.mjs`.
 
 Responsibilities:
 
@@ -757,7 +757,7 @@ MVP should support:
 - `task.wait`
 - `task.read`
 - `run.createAndPost`
-- `packages/openteam-cli/skills/SKILL.md` skill draft
+- `packages/openteamcli/skills/SKILL.md` skill draft
 
 MVP should not support:
 
@@ -866,7 +866,7 @@ Add:
 Add local skill:
 
 ```text
-packages/openteam-cli/skills/SKILL.md
+packages/openteamcli/skills/SKILL.md
 ```
 
 The skill should include examples for:
@@ -923,7 +923,7 @@ npm run build
 - Should `task.wait` add `sourceMessageId` to assistant messages immediately?
 - Should control port be fixed at `19826`, or configured in UI?
 - Should CLI auto-start daemon, like OpenCLI, or require explicit `daemon start`?
-- Should `openteamcli skill install` copy `packages/openteam-cli/skills/SKILL.md` into each supported agent's local skills directory?
+- Should `openteamcli skill install` copy `packages/openteamcli/skills/SKILL.md` into each supported agent's local skills directory?
 
 ## Recommendation
 

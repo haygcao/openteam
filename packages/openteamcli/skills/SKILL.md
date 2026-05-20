@@ -22,7 +22,7 @@ npm install -g @openteam/cli
 开发期可以在 OpenTeam 仓库里执行：
 
 ```bash
-cd packages/openteam-cli
+cd packages/openteamcli
 npm install -g .
 ```
 
@@ -32,13 +32,16 @@ npm install -g .
 npm link
 ```
 
-## 先检查连接
+## 先启动并检查连接
 
 任何操作前先运行：
 
 ```bash
+openteamcli daemon start
 openteamcli doctor
 ```
+
+`daemon start` 是幂等命令。如果 daemon 已经运行，它只会返回 `alreadyRunning`，不会重复启动后台进程。
 
 如果结果里 `extension.connected` 是 `false`：
 
@@ -145,6 +148,7 @@ openteamcli daemon restart
 ## 常用命令
 
 ```bash
+openteamcli daemon start
 openteamcli doctor
 openteamcli daemon status
 openteamcli daemon restart

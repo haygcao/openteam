@@ -67,6 +67,14 @@ describe('extension security configuration', () => {
     expect(manifest.content_security_policy?.extension_pages).toContain('http://127.0.0.1:*')
   })
 
+  it('allows background alarms for local control reconnection checks', () => {
+    const manifest = JSON.parse(readFileSync(resolve(process.cwd(), 'public/manifest.json'), 'utf8')) as {
+      permissions?: string[]
+    }
+
+    expect(manifest.permissions).toContain('alarms')
+  })
+
   it('limits iframe header overrides to supported AI chat subframes', () => {
     const rules = JSON.parse(readFileSync(resolve(process.cwd(), 'public/openteam-frame-rules.json'), 'utf8')) as Array<{
       condition?: {
