@@ -80,7 +80,7 @@ npm run build
 如果你希望 Codex、Claude Code 或其他本机智能体控制 OpenTeam 群聊，可以先从 npm 安装 CLI，再安装 agent skill：
 
 ```bash
-npm install -g @afumu/openteam-cli
+npm install -g @afumu/openteamcli
 npx skills add afumu/openteam --skill openteam-control
 openteamcli daemon start
 openteamcli doctor
