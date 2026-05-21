@@ -60,12 +60,12 @@ function startStatusHeartbeat(): void {
 
   setInterval(() => {
     try {
-      const currentStatus = siteAdapter.checkStatus()
-      
+      const currentStatus = getCurrentSiteStatus()
+
       // Only report if the status or detail has changed to avoid spamming the background
       if (
-        !lastReportedStatus || 
-        currentStatus.status !== lastReportedStatus.status || 
+        !lastReportedStatus ||
+        currentStatus.status !== lastReportedStatus.status ||
         currentStatus.detail !== lastReportedStatus.detail
       ) {
         lastReportedStatus = currentStatus
@@ -79,7 +79,15 @@ function startStatusHeartbeat(): void {
     } catch (error) {
       log.warn('status-heartbeat:check-failed', { error: error instanceof Error ? error.message : String(error) })
     }
-  }, HEARTBEAT_INTERVAL_MS).unref()
+  }, HEARTBEAT_INTERVAL_MS)
+}
+
+function getCurrentSiteStatus(): SiteStatusInfo {
+  if (siteAdapter.checkStatus) return siteAdapter.checkStatus()
+  return {
+    status: siteAdapter.isGenerating() ? 'generating' : 'ready',
+    timestamp: Date.now(),
+  }
 }
 
 async function fillAndSend(content: string, autoSend = true): Promise<void> {

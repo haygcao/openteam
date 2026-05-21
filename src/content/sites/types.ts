@@ -1,4 +1,4 @@
-export type SiteStatus = 'ready' | 'generating' | 'error' | 'blocked' | 'unauthorized'
+import type { SiteStatus } from '../../group/runtimeProtocol'
 
 export interface SiteStatusInfo {
   status: SiteStatus
@@ -22,7 +22,7 @@ export interface ChatSiteAdapter {
   readResponseMarkdown?(node: Node): string
   findResponseContainer(element: Element | null): Element | null
   isGenerating(): boolean
-  checkStatus(): SiteStatusInfo
+  checkStatus?(): SiteStatusInfo
   stopGenerating(): Promise<boolean>
   fillAndSend(content: string, autoSend?: boolean): Promise<void>
   collectPromptDiagnostics(): Record<string, unknown>

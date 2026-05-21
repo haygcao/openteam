@@ -1,4 +1,4 @@
-import type { ChatSiteAdapter, ConversationSnapshot } from './types'
+import type { ChatSiteAdapter, ConversationSnapshot, SiteStatusInfo } from './types'
 import { keepDeepestResponseContainers } from '../responseContainers'
 import { readResponseTextFromCopyAction } from './clipboardCopy'
 import { readEditorText, setContentEditableText } from './contentEditable'
@@ -99,28 +99,28 @@ export function createChatGptAdapter(options: ChatGptAdapterOptions = {}): ChatS
 
 function checkChatGptStatus(): SiteStatusInfo {
   const timestamp = Date.now()
-  
+
   // 1. Check for blockage (Cloudflare, Access Denied)
   if (document.title.includes('Access Denied') || document.querySelector('.cloudflare-challenge')) {
     return { status: 'blocked', detail: 'Access Denied / Cloudflare Challenge', timestamp }
   }
-  
+
   // 2. Check for authentication issues
   if (location.pathname.includes('/auth/login') || location.pathname.includes('/login')) {
     return { status: 'unauthorized', detail: 'Session expired, please login', timestamp }
   }
-  
+
   // 3. Check for explicit error messages in the UI
   const errorEl = document.querySelector(CHATGPT_SELECTORS.errorDialog)
   if (errorEl) {
     return { status: 'error', detail: errorEl.textContent?.trim() || 'Unknown API Error', timestamp }
   }
-  
+
   // 4. Check if generating
   if (isChatGptGenerating()) {
     return { status: 'generating', detail: 'AI is thinking...', timestamp }
   }
-  
+
   return { status: 'ready', timestamp }
 }
 
