@@ -1,4 +1,4 @@
-import type { ChatSite, GroupRole, OpenTeamStore, RoleStatus } from './types'
+import type { ChatSite, GroupRole, OpenTeamStore, RoleStatus, SiteStatus } from './types'
 
 export type RuntimeRoleStatus =
   | 'opening'
@@ -66,6 +66,7 @@ export type RoleToBackgroundMessage =
       conversationId?: string
       conversationUrl?: string
     }
+  | { type: 'TEAM_SITE_STATUS_UPDATE'; siteId: string; status: SiteStatus; detail?: string }
 
 export interface FrameRoleReadyResponse {
   ok: boolean

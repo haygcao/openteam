@@ -22,6 +22,8 @@ const CHATGPT_SELECTORS = {
     'button[data-testid="copy-turn-action-button"], button[aria-label="复制回复"], button[aria-label="Copy response"], button[aria-label="复制"], button[aria-label="Copy"]',
   turn: 'section[data-turn="assistant"][data-testid^="conversation-turn-"], [data-turn="assistant"][data-testid^="conversation-turn-"]',
   activityIndicator: '.result-streaming[aria-busy="true"], [aria-busy="true"] .result-streaming, [data-testid*="thinking"], [data-testid*="reasoning"]',
+  errorDialog: '[role="dialog"] .text-red-500, .error-message, [data-testid="error-message"]',
+  blockedPage: 'title:contains("Access Denied"), .cloudflare-challenge, [data-testid="access-denied"]',
 }
 
 const SKIP_TAGS = new Set(['SCRIPT', 'STYLE', 'BUTTON', 'TEXTAREA', 'SVG'])
@@ -88,10 +90,38 @@ export function createChatGptAdapter(options: ChatGptAdapterOptions = {}): ChatS
     readResponseMarkdown: extractMarkdownFromDom,
     findResponseContainer,
     isGenerating: isChatGptGenerating,
+    checkStatus: checkChatGptStatus,
     stopGenerating: stopChatGptGenerating,
     fillAndSend,
     collectPromptDiagnostics,
   }
+}
+
+function checkChatGptStatus(): SiteStatusInfo {
+  const timestamp = Date.now()
+  
+  // 1. Check for blockage (Cloudflare, Access Denied)
+  if (document.title.includes('Access Denied') || document.querySelector('.cloudflare-challenge')) {
+    return { status: 'blocked', detail: 'Access Denied / Cloudflare Challenge', timestamp }
+  }
+  
+  // 2. Check for authentication issues
+  if (location.pathname.includes('/auth/login') || location.pathname.includes('/login')) {
+    return { status: 'unauthorized', detail: 'Session expired, please login', timestamp }
+  }
+  
+  // 3. Check for explicit error messages in the UI
+  const errorEl = document.querySelector(CHATGPT_SELECTORS.errorDialog)
+  if (errorEl) {
+    return { status: 'error', detail: errorEl.textContent?.trim() || 'Unknown API Error', timestamp }
+  }
+  
+  // 4. Check if generating
+  if (isChatGptGenerating()) {
+    return { status: 'generating', detail: 'AI is thinking...', timestamp }
+  }
+  
+  return { status: 'ready', timestamp }
 }
 
 async function readResponseTextFromCopy(node: Node, timeoutMs: number, pollMs: number): Promise<string | undefined> {
