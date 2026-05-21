@@ -16,6 +16,14 @@ The idea became concrete after I met Lu ([YUANLU007](https://github.com/YUANLU00
 
 ![OpenTeam group chat preview](docs/assets/group-chat-ui-concept.png)
 
+## 💬 Community
+
+Join the OpenTeam WeChat community by scanning the QR code below. If the QR code has expired, add WeChat ID `afumudev` and include `OpenTeam` in your request so I can invite you to the group.
+
+<p>
+  <img src="docs/assets/openteam-wechat-group-qr.jpg" alt="OpenTeam WeChat community QR code" width="280">
+</p>
+
 ## ✨ Highlights
 
 - 🚫 **0 API token workflow**: reuse AI website sessions instead of calling model APIs directly.

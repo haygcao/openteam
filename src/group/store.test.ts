@@ -15,7 +15,7 @@ import { duplicateChat } from '../background/chatHandlers'
 import { BUILTIN_ROLE_TEMPLATES } from './builtinRoleTemplates'
 import { DEFAULT_CUSTOM_ROLE_TEMPLATES } from './defaultCustomRoleTemplates'
 import { defaultLanguageForEnvironment } from '../shared/i18n'
-import type { GroupMessage, OpenTeamStore } from './types'
+import type { GroupMessage, GroupRole, OpenTeamStore, RoomMode } from './types'
 
 describe('group store', () => {
   let stored: Record<string, unknown>
@@ -784,7 +784,7 @@ describe('group store', () => {
       const sourceChatId = 'source-chat'
       const sourceChatName = '核心专家组'
       const sourceMode: RoomMode = 'collaborative'
-      
+
       store.chatsById[sourceChatId] = {
         id: sourceChatId,
         name: sourceChatName,
@@ -798,8 +798,8 @@ describe('group store', () => {
         updatedAt: 1,
       }
       store.chatOrder = [sourceChatId]
-      
-      const sourceRole = {
+
+      const sourceRole: GroupRole = {
         id: 'role-1',
         chatId: sourceChatId,
         name: '首席架构师',

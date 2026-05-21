@@ -16,6 +16,14 @@ OpenTeam 可以看作 [OpenLink](https://github.com/afumu/openlink) 的姊妹篇
 
 ![OpenTeam 群聊预览](docs/assets/group-chat-ui-concept.png)
 
+## 💬 交流群
+
+欢迎扫码加入 OpenTeam 微信交流群。二维码若已过期，请添加微信 `afumudev`，并备注 `OpenTeam`，我会拉你进群。
+
+<p>
+  <img src="docs/assets/openteam-wechat-group-qr.jpg" alt="OpenTeam 微信交流群二维码" width="280">
+</p>
+
 ## ✨ 核心亮点
 
 - 🚫 **0 API token 工作流**：复用 AI 网站网页会话，而不是直接调用模型 API。
