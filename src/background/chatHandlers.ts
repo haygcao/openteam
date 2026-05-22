@@ -1,5 +1,5 @@
 import { createGroupRole } from '../group/roleTemplates'
-import type { GroupChat, GroupMessage, GroupRole, OpenTeamStore, RoomMode } from '../group/types'
+import type { GroupChat, GroupMessage, GroupRole, OpenTeamStore, OrchestrationFlow, OrchestrationStage, RoomMode } from '../group/types'
 import type { BackgroundMessageRoute } from './messageRouter'
 import { messageTabId, type RuntimeMessage } from './runtimeClient'
 import type { RuntimeFrameRegistry } from './runtimeFrames'
@@ -277,6 +277,7 @@ export function duplicateChat(store: OpenTeamStore, sourceChatId: unknown, deps:
     updatedAt: timestamp,
   }
   const roles: GroupRole[] = []
+  const roleIdMap = new Map<string, string>()
 
   store.chatsById[chat.id] = chat
   store.chatOrder.unshift(chat.id)
@@ -286,14 +287,13 @@ export function duplicateChat(store: OpenTeamStore, sourceChatId: unknown, deps:
     const sourceRole = store.rolesById[sourceRoleId]
     if (!sourceRole) continue
 
-    // 计算当前角色实际生效的配置，实现配置快照
     const template = sourceRole.templateId ? store.roleTemplatesById[sourceRole.templateId] : undefined
     const effectiveModelSource = sourceRole.modelSource ?? template?.defaultModelSource ?? 'site'
-    const effectiveChatSite = effectiveModelSource === 'external' 
-      ? undefined 
+    const effectiveChatSite = effectiveModelSource === 'external'
+      ? undefined
       : (sourceRole.chatSite ?? template?.defaultChatSite ?? store.settings.defaultChatSite)
-    const effectiveExternalModelId = effectiveModelSource === 'external' 
-      ? (sourceRole.externalModelId ?? template?.defaultExternalModelId) 
+    const effectiveExternalModelId = effectiveModelSource === 'external'
+      ? (sourceRole.externalModelId ?? template?.defaultExternalModelId)
       : undefined
 
     const role: GroupRole = {
@@ -305,8 +305,8 @@ export function duplicateChat(store: OpenTeamStore, sourceChatId: unknown, deps:
       ...(sourceRole.systemPrompt ? { systemPrompt: sourceRole.systemPrompt } : {}),
       ...(sourceRole.avatarColor ? { avatarColor: sourceRole.avatarColor } : {}),
       modelSource: effectiveModelSource,
-      chatSite: effectiveChatSite,
-      externalModelId: effectiveExternalModelId,
+      ...(effectiveChatSite ? { chatSite: effectiveChatSite } : {}),
+      ...(effectiveExternalModelId ? { externalModelId: effectiveExternalModelId } : {}),
       status: 'pending',
       contextCursor: 0,
       createdAt: timestamp,
@@ -315,9 +315,9 @@ export function duplicateChat(store: OpenTeamStore, sourceChatId: unknown, deps:
     store.rolesById[role.id] = role
     chat.roleIds.push(role.id)
     roles.push(role)
+    roleIdMap.set(sourceRole.id, role.id)
   }
 
-  // 继承编排配置 (Fixes #14)
   const sourceFlowIds = store.orchestrationFlowOrderByChatId[sourceChat.id] ?? []
   if (sourceFlowIds.length > 0) {
     const newFlowIds: string[] = []
@@ -326,13 +326,7 @@ export function duplicateChat(store: OpenTeamStore, sourceChatId: unknown, deps:
       if (!sourceFlow) continue
 
       const newFlowId = deps.newId('flow')
-      const newFlow = {
-        ...sourceFlow,
-        id: newFlowId,
-        chatId: chat.id,
-        createdAt: timestamp,
-        updatedAt: timestamp,
-      }
+      const newFlow = duplicateOrchestrationFlow(sourceFlow, newFlowId, chat.id, roleIdMap, timestamp)
       store.orchestrationFlowsById[newFlowId] = newFlow
       newFlowIds.push(newFlowId)
     }
@@ -340,6 +334,47 @@ export function duplicateChat(store: OpenTeamStore, sourceChatId: unknown, deps:
   }
 
   return { chat, roles }
+}
+
+function duplicateOrchestrationFlow(
+  sourceFlow: OrchestrationFlow,
+  flowId: string,
+  chatId: string,
+  roleIdMap: Map<string, string>,
+  timestamp: number,
+): OrchestrationFlow {
+  return {
+    ...sourceFlow,
+    id: flowId,
+    chatId,
+    stages: sourceFlow.stages.map(stage => duplicateOrchestrationStage(stage, roleIdMap)),
+    ...(sourceFlow.graph ? {
+      graph: {
+        stageNodes: sourceFlow.graph.stageNodes.map(stage => duplicateOrchestrationStage(stage, roleIdMap)),
+        edges: sourceFlow.graph.edges.map(edge => ({
+          ...edge,
+          ...(edge.vertices ? { vertices: edge.vertices.map(vertex => ({ ...vertex })) } : {}),
+        })),
+      },
+    } : {}),
+    ...(sourceFlow.autoPlanHistory ? { autoPlanHistory: sourceFlow.autoPlanHistory.map(entry => ({ ...entry })) } : {}),
+    createdAt: timestamp,
+    updatedAt: timestamp,
+  }
+}
+
+function duplicateOrchestrationStage(stage: OrchestrationStage, roleIdMap: Map<string, string>): OrchestrationStage {
+  return {
+    ...stage,
+    ...(stage.position ? { position: { ...stage.position } } : {}),
+    roleIds: stage.roleIds.map(roleId => roleIdMap.get(roleId) ?? roleId),
+    ...(stage.review ? {
+      review: {
+        ...stage.review,
+        reviewerRoleIds: stage.review.reviewerRoleIds.map(roleId => roleIdMap.get(roleId) ?? roleId),
+      },
+    } : {}),
+  }
 }
 
 function duplicatedChatName(store: OpenTeamStore, sourceName: string): string {
