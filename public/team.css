@@ -1211,6 +1211,12 @@ select:focus {
   display: none;
 }
 
+.manual-mention-toggle[aria-pressed="true"] {
+  border-color: rgba(90, 198, 150, 0.45);
+  background: rgba(90, 198, 150, 0.16);
+  color: #c7f7df;
+}
+
 .theme-switch {
   position: relative;
   display: inline-grid;

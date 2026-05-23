@@ -39,6 +39,16 @@ describe('parseGroupMentions', () => {
     })
   })
 
+  it('targets default orchestration when @orchestration is used', () => {
+    expect(parseGroupMentions('@orchestration plan this', roles, { defaultTarget: 'none' })).toEqual({
+      ok: true,
+      content: 'plan this',
+      targetRoleIds: [],
+      mentionedRoleIds: [],
+      orchestrationTarget: 'default',
+    })
+  })
+
   it('targets named orchestration when @编排:name is used', () => {
     expect(parseGroupMentions('@编排:代码评审 帮我看看', roles, { defaultTarget: 'none' })).toEqual({
       ok: true,
@@ -46,6 +56,15 @@ describe('parseGroupMentions', () => {
       targetRoleIds: [],
       mentionedRoleIds: [],
       orchestrationTarget: { name: '代码评审' },
+    })
+  })
+
+  it('targets one or more mentioned roles and strips mention labels from content', () => {
+    expect(parseGroupMentions('@工程师 @产品经理 请评估', roles, { defaultTarget: 'none' })).toEqual({
+      ok: true,
+      content: '请评估',
+      targetRoleIds: ['role-eng', 'role-pm'],
+      mentionedRoleIds: ['role-eng', 'role-pm'],
     })
   })
 

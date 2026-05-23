@@ -83,7 +83,8 @@ export function createMessageHandlers(deps: MessageHandlersDependencies): Backgr
       if (!parsed.ok) throw new Error(parsed.error)
 
       let finalTargetRoleIds = parsed.targetRoleIds
-      if (chat.requireManualMention && parsed.mentionedRoleIds.length === 0 && !parsed.orchestrationTarget) {
+      const hasManualRoute = parsed.mentionedRoleIds.length > 0 || Boolean(parsed.mentionsAll) || Boolean(parsed.orchestrationTarget)
+      if (chat.requireManualMention && !hasManualRoute) {
         finalTargetRoleIds = []
       }
       deps.log.debug('message-send:parsed-targets', { chatId: chat.id, targetRoleIds: finalTargetRoleIds })

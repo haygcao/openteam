@@ -1,5 +1,7 @@
 import type { GroupRole, OpenTeamSettings } from './types'
 
+type OrchestrationMentionTarget = 'default' | { name: string }
+
 export type ParsedGroupMention =
   | {
       ok: true
@@ -7,7 +9,7 @@ export type ParsedGroupMention =
       targetRoleIds: string[]
       mentionedRoleIds: string[]
       mentionsAll?: true
-      orchestrationTarget?: 'default' | { name: string }
+      orchestrationTarget?: OrchestrationMentionTarget
     }
   | {
       ok: false
@@ -38,7 +40,7 @@ export function parseGroupMentions(raw: string, roles: GroupRole[], options: Par
   ]).sort((left, right) => right.label.length - left.label.length)
   const targetRoleIds = new Set<string>()
   let targetsAll = false
-  let orchestrationTarget: 'default' | { name: string } | undefined = undefined
+  let orchestrationTarget: OrchestrationMentionTarget | undefined
   let content = ''
   let index = 0
 
@@ -49,23 +51,11 @@ export function parseGroupMentions(raw: string, roles: GroupRole[], options: Par
       continue
     }
 
-    // 1. Check for Orchestration triggers (@编排 or @编排:name)
-    if (trimmed.startsWith('@编排', index)) {
-      const afterPrefix = trimmed.slice(index + 3) // length of '@编排' is 3
-      if (afterPrefix.startsWith(':')) {
-        // Named orchestration: @编排:name
-        const match = afterPrefix.slice(1).match(/^([^\s，。！？,.!?;；:：]+)/)
-        if (match) {
-          orchestrationTarget = { name: match[1] }
-          index += 3 + 1 + match[1].length
-          continue
-        }
-      } else if (afterPrefix.length === 0 || /\s|[，。！？,.!?;；:：]/.test(afterPrefix[0])) {
-        // Default orchestration: @编排
-        orchestrationTarget = 'default'
-        index += 3
-        continue
-      }
+    const orchestrationMention = readOrchestrationMention(trimmed, index)
+    if (orchestrationMention) {
+      orchestrationTarget = orchestrationMention.target
+      index = orchestrationMention.nextIndex
+      continue
     }
 
     const allMentionLabel = ['all', '所有人'].find(label => mentionMatches(trimmed, index, label))
@@ -129,7 +119,26 @@ function siteLabel(site: GroupRole['chatSite']): string {
 function mentionMatches(raw: string, atIndex: number, target: string): boolean {
   if (!raw.startsWith(`@${target}`, atIndex)) return false
   const next = raw[atIndex + target.length + 1]
-  return next === undefined || /\s|[，。！？,.!?;；:：]/.test(next)
+  return next === undefined || isMentionBoundary(next)
+}
+
+function readOrchestrationMention(raw: string, atIndex: number): { target: OrchestrationMentionTarget; nextIndex: number } | undefined {
+  for (const label of ['编排', 'orchestration']) {
+    if (!raw.startsWith(`@${label}`, atIndex)) continue
+    const nextIndex = atIndex + label.length + 1
+    const afterLabel = raw.slice(nextIndex)
+    if (afterLabel.startsWith(':') || afterLabel.startsWith('：')) {
+      const name = afterLabel.slice(1).match(/^([^\s，。！？,.!?;；:：]+)/)?.[1]
+      if (!name) return undefined
+      return { target: { name }, nextIndex: nextIndex + 1 + name.length }
+    }
+    const next = raw[nextIndex]
+    if (next === undefined || isMentionBoundary(next)) return { target: 'default', nextIndex }
+  }
+}
+
+function isMentionBoundary(value: string): boolean {
+  return /\s|[，。！？,.!?;；:：]/.test(value)
 }
 
 function defaultTargetRoleIds(allRoleIds: string[], options: ParseGroupMentionsOptions): string[] {

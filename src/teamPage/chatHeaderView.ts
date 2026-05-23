@@ -13,6 +13,7 @@ export interface ChatHeaderViewDependencies {
   getCurrentChat(): GroupChat | undefined
   getCurrentRoles(): GroupRole[]
   getCurrentMessages(): GroupMessage[]
+  runCommand(type: string, payload?: Record<string, unknown>): Promise<void>
 }
 
 export interface ChatHeaderView {
@@ -20,7 +21,7 @@ export interface ChatHeaderView {
 }
 
 export function createChatHeaderView(deps: ChatHeaderViewDependencies): ChatHeaderView {
-  let manualMentionToggle: HTMLInputElement | undefined
+  let manualMentionToggle: HTMLButtonElement | undefined
 
   function renderChatHeader(): void {
     const chat = deps.getCurrentChat()
@@ -34,7 +35,10 @@ export function createChatHeaderView(deps: ChatHeaderViewDependencies): ChatHead
       deps.togglePeopleDrawerEl.textContent = ui('成员 0')
       deps.togglePeopleDrawerEl.disabled = true
       deps.openOrchestrationEl.hidden = true
-      if (manualMentionToggle) manualMentionToggle.hidden = true
+      if (manualMentionToggle) {
+        manualMentionToggle.hidden = true
+        manualMentionToggle.disabled = true
+      }
       return
     }
 
@@ -48,20 +52,23 @@ export function createChatHeaderView(deps: ChatHeaderViewDependencies): ChatHead
     deps.togglePeopleDrawerEl.setAttribute('aria-expanded', String(deps.state.peopleDrawerOpen))
     deps.openOrchestrationEl.hidden = chat.mode !== 'collaborative'
 
-    // Manual Mention Toggle
     if (!manualMentionToggle) {
-      manualMentionToggle = document.createElement('input')
-      manualMentionToggle.type = 'checkbox'
-      manualMentionToggle.className = 'chat-header-toggle'
-      manualMentionToggle.title = ui('开启后，只有被 @ 的成员才会回复')
-      manualMentionToggle.addEventListener('change', async () => {
-        await deps.runCommand('GROUP_CHAT_UPDATE', { requireManualMention: manualMentionToggle?.checked })
+      manualMentionToggle = document.createElement('button')
+      manualMentionToggle.type = 'button'
+      manualMentionToggle.className = 'btn drawer-summary manual-mention-toggle'
+      manualMentionToggle.addEventListener('click', async () => {
+        const current = deps.getCurrentChat()
+        if (!current) return
+        await deps.runCommand('GROUP_CHAT_UPDATE', { chatId: current.id, requireManualMention: !current.requireManualMention })
       })
-      // Insert before the people drawer button for better layout
       deps.togglePeopleDrawerEl.parentElement?.insertBefore(manualMentionToggle, deps.togglePeopleDrawerEl)
     }
     manualMentionToggle.hidden = chat.mode !== 'collaborative'
-    manualMentionToggle.checked = !!chat.requireManualMention
+    manualMentionToggle.disabled = false
+    manualMentionToggle.textContent = ui(chat.requireManualMention ? '仅 @ 回复' : '@ 触发回复')
+    manualMentionToggle.title = ui('开启后，只有被 @ 的成员才会回复')
+    manualMentionToggle.setAttribute('aria-label', ui('开启后，只有被 @ 的成员才会回复'))
+    manualMentionToggle.setAttribute('aria-pressed', String(!!chat.requireManualMention))
   }
 
   function ui(source: string): string {
