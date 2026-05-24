@@ -154,7 +154,6 @@ export function createReplyObserver(options: {
     clearReplyPolling()
     replyTimeout.arm(messageId)
 
-    let stableElement: Element | undefined
     let stableText = ''
     let stableSince = 0
 
@@ -163,7 +162,6 @@ export function createReplyObserver(options: {
     }
 
     const resetStableCandidate = () => {
-      stableElement = undefined
       stableText = ''
       stableSince = 0
     }
@@ -191,8 +189,7 @@ export function createReplyObserver(options: {
 
       const timestamp = Date.now()
       const generating = siteAdapter.isGenerating()
-      if (candidate.element !== stableElement || candidate.text !== stableText) {
-        stableElement = candidate.element
+      if (candidate.text !== stableText) {
         stableText = candidate.text
         stableSince = timestamp
         log.debug('reply-poll:candidate', { messageId, textLength: candidate.text.length })

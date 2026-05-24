@@ -201,6 +201,42 @@ describe('createReplyObserver', () => {
 
     vi.useRealTimers()
   })
+
+  it('keeps the stable polling window when the reply text stays the same but DeepSeek-style containers are replaced', async () => {
+    vi.useFakeTimers()
+    document.body.innerHTML = '<message-content id="reply-a">这是一个已经完整渲染结束的 DeepSeek 回复内容，文本本身没有继续变化，但容器节点会被虚拟列表替换。</message-content>'
+
+    const sentMessages: RoleToBackgroundMessage[] = []
+    const roleSession = createFakeRoleSession()
+    const adapter = createFakeAdapter({ isGenerating: () => false })
+    const observer = createReplyObserver({
+      siteAdapter: adapter,
+      roleSession,
+      log: createFakeLog(),
+      sendRuntimeMessage: async message => {
+        sentMessages.push(message)
+        return { ok: true } as never
+      },
+      reportRoleError: vi.fn(),
+    })
+
+    roleSession.startPrompt('msg-1', 'attempt-1')
+    observer.startReplyPolling('msg-1', 'attempt-1')
+
+    await vi.advanceTimersByTimeAsync(2_000)
+    document.querySelector('message-content')?.replaceWith(createMessageContent('reply-b', '这是一个已经完整渲染结束的 DeepSeek 回复内容，文本本身没有继续变化，但容器节点会被虚拟列表替换。'))
+    await vi.advanceTimersByTimeAsync(2_000)
+    document.querySelector('message-content')?.replaceWith(createMessageContent('reply-c', '这是一个已经完整渲染结束的 DeepSeek 回复内容，文本本身没有继续变化，但容器节点会被虚拟列表替换。'))
+    await vi.advanceTimersByTimeAsync(2_000)
+
+    expect(sentMessages).toContainEqual(expect.objectContaining({
+      type: 'TEAM_ROLE_REPLY',
+      messageId: 'msg-1',
+      content: '这是一个已经完整渲染结束的 DeepSeek 回复内容，文本本身没有继续变化，但容器节点会被虚拟列表替换。',
+    }))
+
+    vi.useRealTimers()
+  })
 })
 
 function createFakeRoleSession(): RoleSession {
@@ -252,4 +288,11 @@ function createFakeLog() {
     warn: vi.fn(),
     error: vi.fn(),
   }
+}
+
+function createMessageContent(id: string, text: string): HTMLElement {
+  const element = document.createElement('message-content')
+  element.id = id
+  element.textContent = text
+  return element
 }
