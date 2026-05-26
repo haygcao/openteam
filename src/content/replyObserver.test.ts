@@ -306,6 +306,46 @@ describe('createReplyObserver', () => {
 
     vi.useRealTimers()
   })
+
+  it('reports a new reply when DeepSeek virtual list prunes older baseline containers', async () => {
+    vi.useFakeTimers()
+    document.body.innerHTML = `
+      <message-content id="old-1">历史回复 1</message-content>
+      <message-content id="old-2">历史回复 2</message-content>
+      <message-content id="old-3">历史回复 3</message-content>
+    `
+
+    const sentMessages: RoleToBackgroundMessage[] = []
+    const roleSession = createFakeRoleSession()
+    const observer = createReplyObserver({
+      siteAdapter: createFakeAdapter({ isGenerating: () => false }),
+      roleSession,
+      log: createFakeLog(),
+      sendRuntimeMessage: async message => {
+        sentMessages.push(message)
+        return { ok: true } as never
+      },
+      reportRoleError: vi.fn(),
+    })
+
+    observer.capturePromptReplyBaseline('msg-1')
+    roleSession.startPrompt('msg-1', 'attempt-1')
+    document.body.innerHTML = `
+      <message-content id="old-3-rebuilt">历史回复 3</message-content>
+      <message-content id="new-reply">这是 DeepSeek 在虚拟列表裁剪历史节点后出现的新回复。</message-content>
+    `
+    observer.startReplyPolling('msg-1', 'attempt-1')
+
+    await vi.advanceTimersByTimeAsync(8_000)
+
+    expect(sentMessages).toContainEqual(expect.objectContaining({
+      type: 'TEAM_ROLE_REPLY',
+      messageId: 'msg-1',
+      content: '这是 DeepSeek 在虚拟列表裁剪历史节点后出现的新回复。',
+    }))
+
+    vi.useRealTimers()
+  })
 })
 
 function createFakeRoleSession(): RoleSession {

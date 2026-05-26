@@ -115,7 +115,7 @@ export function createReplyObserver(options: {
   function isPromptBaselineReply(text: string, element: Element): boolean {
     const currentContainers = siteAdapter.getResponseContainers()
     const elementIndex = currentContainers.indexOf(element)
-    if (elementIndex >= 0) return elementIndex < promptBaselineContainerCount
+    if (elementIndex >= 0 && currentContainers.length > promptBaselineContainerCount) return elementIndex < promptBaselineContainerCount
 
     const trimmed = text.trim()
     if (!trimmed) return true
