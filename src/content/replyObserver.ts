@@ -1,5 +1,5 @@
 import type { RoleToBackgroundMessage } from '../group/runtimeProtocol'
-import { findLatestCompensationCandidate, findLatestCompensationReply } from './replyCompensation'
+import type { ReplyImageSource } from '../group/types'
 import { createReplyTimeout } from './replyTimeout'
 import { createReplyTracker } from './replyTracker'
 import { resolveReportableReplyText, type ReportableReplyText } from './reportableReply'
@@ -84,7 +84,7 @@ export function createReplyObserver(options: {
     const containers = siteAdapter.getResponseContainers()
     const replies = containers.map(container => siteAdapter.readResponseText(container)).filter(Boolean)
     promptBaselineContainers = new Set(containers)
-    promptBaselineReplies = new Set(replies.map(reply => reply.trim()).filter(Boolean))
+    promptBaselineReplies = new Set(containers.map(element => readReplySnapshot(element)).filter(hasReplySnapshot).map(snapshot => snapshot.key))
     promptBaselineContainerCount = countResponseContainers(containers)
     promptBaselinePromptId = messageId ?? ''
     replyTracker.seed(getConversationId(), replies)
@@ -117,9 +117,9 @@ export function createReplyObserver(options: {
     const elementIndex = currentContainers.indexOf(element)
     if (elementIndex >= 0 && currentContainers.length > promptBaselineContainerCount) return elementIndex < promptBaselineContainerCount
 
-    const trimmed = text.trim()
-    if (!trimmed) return true
-    if (promptBaselineReplies.has(trimmed)) return true
+    const snapshot = readReplySnapshot(element, text)
+    if (!hasReplySnapshot(snapshot)) return true
+    if (promptBaselineReplies.has(snapshot.key)) return true
 
     for (const container of promptBaselineContainers) {
       if (container === element || container.contains(element)) return true
@@ -129,20 +129,18 @@ export function createReplyObserver(options: {
   }
 
   function findCompensationReply(messageId: string): { text: string; element: Element } | undefined {
-    return findLatestCompensationReply({
-      containers: siteAdapter.getResponseContainers(),
-      readText: siteAdapter.readResponseText,
-      isBaseline: isPromptBaselineReply,
-      consume: text => replyTracker.consumeIfNewForMessage(getConversationId(), text, messageId),
-    })
+    return keepDeepestResponseContainers(siteAdapter.getResponseContainers())
+      .map(element => readReplySnapshot(element))
+      .filter(snapshot => hasReplySnapshot(snapshot) && !isPromptBaselineReply(snapshot.text, snapshot.element))
+      .reverse()
+      .find(snapshot => replyTracker.consumeIfNewForMessage(getConversationId(), snapshot.key, messageId))
   }
 
   function findCompensationCandidate(): { text: string; element: Element } | undefined {
-    return findLatestCompensationCandidate({
-      containers: siteAdapter.getResponseContainers(),
-      readText: siteAdapter.readResponseText,
-      isBaseline: isPromptBaselineReply,
-    })
+    return keepDeepestResponseContainers(siteAdapter.getResponseContainers())
+      .map(element => readReplySnapshot(element))
+      .filter(snapshot => hasReplySnapshot(snapshot) && !isPromptBaselineReply(snapshot.text, snapshot.element))
+      .reverse()[0]
   }
 
   function clearReplyPolling(): void {
@@ -166,7 +164,7 @@ export function createReplyObserver(options: {
     clearReplyPolling()
     replyTimeout.arm(messageId)
 
-    let stableText = ''
+    let stableKey = ''
     let stableSince = 0
 
     const schedule = () => {
@@ -174,7 +172,7 @@ export function createReplyObserver(options: {
     }
 
     const resetStableCandidate = () => {
-      stableText = ''
+      stableKey = ''
       stableSince = 0
     }
 
@@ -199,12 +197,13 @@ export function createReplyObserver(options: {
         return
       }
 
+      const candidateSnapshot = readReplySnapshot(candidate.element, candidate.text)
       const timestamp = Date.now()
       const generating = siteAdapter.isGenerating()
-      if (candidate.text !== stableText) {
-        stableText = candidate.text
+      if (candidateSnapshot.key !== stableKey) {
+        stableKey = candidateSnapshot.key
         stableSince = timestamp
-        log.debug('reply-poll:candidate', { messageId, textLength: candidate.text.length })
+        log.debug('reply-poll:candidate', { messageId, textLength: candidate.text.length, imageCount: candidateSnapshot.images.length })
         schedule()
         return
       }
@@ -219,7 +218,7 @@ export function createReplyObserver(options: {
         schedule()
         return
       }
-      if (isVeryShortReply(candidate.text) && stableDuration < SHORT_REPLY_STABLE_SETTLE_MS) {
+      if (candidate.text && isVeryShortReply(candidate.text) && stableDuration < SHORT_REPLY_STABLE_SETTLE_MS) {
         log.debug('reply-poll:defer-short', {
           messageId,
           stableDuration,
@@ -236,7 +235,7 @@ export function createReplyObserver(options: {
           const active = roleSession.getActivePrompt()
           const assignedRole = roleSession.getAssignedRole()
           if (active?.messageId !== messageId || active.replyAttemptId !== replyAttemptId) return
-          if (!replyTracker.consumeIfNewForMessage(getConversationId(), reply.text, messageId)) {
+          if (!replyTracker.consumeIfNewForMessage(getConversationId(), reportableReplyKey(reply), messageId)) {
             log.debug('reply-poll:skipped', { messageId, textLength: reply.text.length, roleId: assignedRole?.roleId })
             schedule()
             return
@@ -278,6 +277,7 @@ export function createReplyObserver(options: {
         replyAttemptId,
         content: text,
         contentFormat: reply.contentFormat,
+        images: reply.images,
         conversationId: snapshot.conversationId,
         conversationUrl: snapshot.conversationUrl,
       })
@@ -309,7 +309,8 @@ export function createReplyObserver(options: {
     if (!reply) return false
 
     log.warn('reply:compensated', { messageId, textLength: reply.text.length, roleId: assignedRole.roleId, source })
-    reportAcceptedReply(messageId, { text: reply.text }, source)
+    const snapshot = readReplySnapshot(reply.element, reply.text)
+    reportAcceptedReply(messageId, { text: reply.text, ...(snapshot.images.length > 0 ? { images: snapshot.images } : {}) }, source)
     return true
   }
 
@@ -364,35 +365,35 @@ export function createReplyObserver(options: {
 
       const pendingCount = pendingContainers.size
       const containers = keepDeepestResponseContainers([...pendingContainers])
-      const snapshots = containers.map(container => ({ container, text: siteAdapter.readResponseText(container) })).filter(snapshot => Boolean(snapshot.text))
+      const snapshots = containers.map(element => readReplySnapshot(element)).filter(hasReplySnapshot)
       log.debug('observer:flush', { pending: pendingCount, kept: containers.length, snapshots: snapshots.length })
       pendingContainers.clear()
 
       window.setTimeout(() => {
         const generating = siteAdapter.isGenerating()
         for (const snapshot of snapshots) {
-          if (!snapshot.container.isConnected) continue
+          if (!snapshot.element.isConnected) continue
 
-          const text = siteAdapter.readResponseText(snapshot.container)
-          if (!text) continue
+          const current = readReplySnapshot(snapshot.element)
+          if (!hasReplySnapshot(current)) continue
 
-          if (generating || text !== snapshot.text) {
+          if (generating || current.key !== snapshot.key) {
             log.debug('observer:defer-unstable', {
               generating,
               previousLength: snapshot.text.length,
-              currentLength: text.length,
+              currentLength: current.text.length,
             })
-            schedule(snapshot.container)
+            schedule(snapshot.element)
             continue
           }
 
-          if (shouldDeferShortReply(snapshot.container, text)) {
-            schedule(snapshot.container)
+          if (current.text && shouldDeferShortReply(snapshot.element, current.text)) {
+            schedule(snapshot.element)
             continue
           }
 
-          log.debug('observer:stable', { textLength: text.length })
-          onStableText(text, snapshot.container)
+          log.debug('observer:stable', { textLength: current.text.length, imageCount: current.images.length })
+          onStableText(current.text, snapshot.element)
         }
       }, RESPONSE_FINAL_SETTLE_MS)
     }
@@ -428,14 +429,14 @@ export function createReplyObserver(options: {
 
     new MutationObserver(mutations => {
       for (const mutation of mutations) {
-        if (mutation.type === 'characterData') {
+        if (mutation.type === 'characterData' || mutation.type === 'attributes') {
           inspectNode(mutation.target)
           continue
         }
 
         mutation.addedNodes.forEach(inspectNode)
       }
-    }).observe(document.body, { childList: true, subtree: true, characterData: true })
+    }).observe(document.body, { childList: true, subtree: true, characterData: true, attributes: true, attributeFilter: ['src'] })
 
     requestAnimationFrame(() => {
       siteAdapter.getResponseContainers().forEach(schedule)
@@ -461,7 +462,7 @@ export function createReplyObserver(options: {
         .then(reply => {
           const currentRole = roleSession.getAssignedRole()
           if (!currentRole) return
-          if (!replyTracker.consumeIfNewForMessage(getConversationId(), reply.text, messageId)) {
+          if (!replyTracker.consumeIfNewForMessage(getConversationId(), reportableReplyKey(reply), messageId)) {
             log.debug('reply:skipped', { messageId, textLength: reply.text.length, roleId: currentRole.roleId })
             return
           }
@@ -486,6 +487,17 @@ export function createReplyObserver(options: {
     replyTracker.seed(getConversationId(), siteAdapter.getAllAssistantReplies())
   }
 
+  function readReplySnapshot(element: Element, knownText?: string): ReplySnapshot {
+    const text = knownText ?? siteAdapter.readResponseText(element)
+    const images = siteAdapter.readResponseImages?.(element) ?? []
+    return {
+      element,
+      text,
+      images,
+      key: buildReplyKey(text, images),
+    }
+  }
+
   return {
     capturePromptReplyBaseline,
     clearPromptReplyBaseline,
@@ -495,4 +507,23 @@ export function createReplyObserver(options: {
     seedStoredRoleReplies,
     resetForAssignedRole,
   }
+}
+
+interface ReplySnapshot {
+  element: Element
+  text: string
+  images: ReplyImageSource[]
+  key: string
+}
+
+function hasReplySnapshot(snapshot: ReplySnapshot): boolean {
+  return Boolean(snapshot.text.trim() || snapshot.images.length > 0)
+}
+
+function buildReplyKey(text: string, images: ReplyImageSource[]): string {
+  return `${text.trim()}\u0000${images.map(image => image.sourceUrl).sort().join('\u0000')}`
+}
+
+function reportableReplyKey(reply: ReportableReplyText): string {
+  return buildReplyKey(reply.text, reply.images ?? [])
 }

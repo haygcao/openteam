@@ -1,10 +1,12 @@
 import { keepDeepestResponseContainers } from './responseContainers'
+import type { ReplyImageSource } from '../group/types'
 import type { ContentLogger } from './runtimeClient'
 import type { ChatSiteAdapter } from './sites/types'
 
 export interface ReportableReplyText {
   text: string
   contentFormat?: 'markdown'
+  images?: ReplyImageSource[]
 }
 
 const LONG_REPLY_TEXT_LENGTH = 160
@@ -17,10 +19,15 @@ export async function resolveReportableReplyText(
   fallbackText: string,
   log: ContentLogger,
 ): Promise<ReportableReplyText> {
+  const images = siteAdapter.readResponseImages?.(element) ?? []
+  if (!fallbackText.trim()) return { text: '', ...(images.length > 0 ? { images } : {}) }
+
   try {
     const copiedText = await siteAdapter.readResponseTextFromCopy?.(element)
     const trimmedCopiedText = copiedText?.trim()
-    if (trimmedCopiedText && !isSuspiciousCopiedReply(trimmedCopiedText, fallbackText)) return { text: trimmedCopiedText, contentFormat: 'markdown' }
+    if (trimmedCopiedText && !isSuspiciousCopiedReply(trimmedCopiedText, fallbackText)) {
+      return { text: trimmedCopiedText, contentFormat: 'markdown', ...(images.length > 0 ? { images } : {}) }
+    }
     if (trimmedCopiedText) {
       log.warn('reply-copy:ignored-suspicious-short-text', {
         copiedLength: normalizeReplyForLengthCheck(trimmedCopiedText).length,
@@ -33,12 +40,12 @@ export async function resolveReportableReplyText(
 
   try {
     const markdownText = siteAdapter.readResponseMarkdown?.(element).trim()
-    if (markdownText) return { text: markdownText, contentFormat: 'markdown' }
+    if (markdownText) return { text: markdownText, contentFormat: 'markdown', ...(images.length > 0 ? { images } : {}) }
   } catch (error) {
     log.warn('reply-markdown:failed', { error: error instanceof Error ? error.message : String(error) })
   }
 
-  return { text: fallbackText }
+  return { text: fallbackText, ...(images.length > 0 ? { images } : {}) }
 }
 
 export async function readResyncReplyText(
@@ -53,8 +60,12 @@ export async function readResyncReplyText(
 
 function findResyncReplyCandidate(siteAdapter: ChatSiteAdapter, currentContent: string | undefined, log: ContentLogger): { element: Element; text: string } | undefined {
   const candidates = keepDeepestResponseContainers(siteAdapter.getResponseContainers())
-    .map(element => ({ element, text: siteAdapter.readResponseText(element).trim() }))
-    .filter(candidate => candidate.text)
+    .map(element => ({
+      element,
+      text: siteAdapter.readResponseText(element).trim(),
+      imageCount: siteAdapter.readResponseImages?.(element).length ?? 0,
+    }))
+    .filter(candidate => candidate.text || candidate.imageCount > 0)
 
   if (candidates.length === 0) return undefined
 

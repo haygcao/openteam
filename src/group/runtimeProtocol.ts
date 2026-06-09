@@ -1,4 +1,4 @@
-import type { ChatSite, GroupRole, OpenTeamStore, RoleStatus } from './types'
+import type { ChatSite, GroupRole, OpenTeamStore, ReplyImageSource, RoleStatus } from './types'
 
 export type RuntimeRoleStatus =
   | 'opening'
@@ -55,6 +55,7 @@ export type RoleToBackgroundMessage =
       messageId: string
       content: string
       contentFormat?: 'markdown'
+      images?: ReplyImageSource[]
       conversationId?: string
       conversationUrl?: string
     }
@@ -66,6 +67,7 @@ export type RoleToBackgroundMessage =
       replyAttemptId?: string
       content: string
       contentFormat?: 'markdown'
+      images?: ReplyImageSource[]
       conversationId?: string
       conversationUrl?: string
     }

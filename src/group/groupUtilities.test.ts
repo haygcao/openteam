@@ -459,6 +459,24 @@ describe('context sync utilities', () => {
     expect(context.contextText).toBe('')
   })
 
+  it('does not add pure image replies to another role text context', () => {
+    const chat = makeChat('chat-1')
+    chat.messageIds = ['msg-image', 'msg-current']
+    const role = makeRole('role-b', 'B')
+    const imageReply = {
+      ...makeMessage('msg-image', 1, 'assistant', ''),
+      roleId: 'role-a',
+      roleName: '视觉设计师',
+      attachments: [{ id: 'attachment-1', type: 'image' as const, status: 'ready' as const }],
+    }
+    const currentUserMessage = makeMessage('msg-current', 2, 'user', '继续')
+
+    const context = buildUnsyncedContext(chat, role, [imageReply, currentUserMessage], currentUserMessage)
+
+    expect(context.messages).toEqual([])
+    expect(context.contextText).toBe('')
+  })
+
   it('formats truncated unsynced context and reports the latest message cursor', () => {
     const chat = makeChat('chat-1')
     chat.messageIds = ['msg-1', 'msg-2', 'msg-3']

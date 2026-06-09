@@ -3,7 +3,7 @@ import { normalizeMessageHighlightColor } from '../group/highlightColors'
 import { defaultMentionTargetForMessage, parseGroupMentions, roleMentionLabelOptionsFromSettings } from '../group/mentionParser'
 import { mapRuntimeRoleStatus } from '../group/runtimeProtocol'
 import type { BackgroundToRoleMessage } from '../group/runtimeProtocol'
-import type { ExternalModelConfig, GroupChat, GroupMessage, GroupRole, MessageReference, OpenTeamStore, RuntimeFrameBinding } from '../group/types'
+import type { ExternalModelConfig, GroupChat, GroupMessage, GroupRole, MessageImageAttachment, MessageReference, OpenTeamStore, ReplyImageSource, RuntimeFrameBinding } from '../group/types'
 import { createExternalModelClient, type ExternalModelClient } from './externalModelClient'
 import type { BackgroundMessageRoute } from './messageRouter'
 import type { PromptDelivery, PromptSender } from './promptDelivery'
@@ -58,6 +58,10 @@ export interface MessageHandlersDependencies {
   promptDeliveryLimiter?: SitePromptDeliveryLimiter
   externalModelClient?: ExternalModelClient
   externalModelRuns?: ExternalModelRunRegistry
+  imageAttachments?: {
+    captureReplyImages(input: { chatId: string; messageId: string; images: ReplyImageSource[] }): Promise<MessageImageAttachment[]>
+    deleteByIds(ids: string[]): Promise<void>
+  }
   deliveryRetryDelaysMs?: readonly number[]
   externalModelRetryDelaysMs?: readonly number[]
   roleErrorRetryDelaysMs?: readonly number[]
@@ -221,6 +225,7 @@ export function createMessageHandlers(deps: MessageHandlersDependencies): Backgr
     const chatId = requireString(message.chatId, '缺少群聊 ID')
     const roleId = requireString(message.roleId, '缺少人员 ID')
     const timestamp = deps.now()
+    let discardedAttachmentIds: string[] = []
 
     const { store, result } = await mutateStore(store => {
       const chat = requireChat(store, chatId)
@@ -229,7 +234,10 @@ export function createMessageHandlers(deps: MessageHandlersDependencies): Backgr
       const retryTarget = resolveRetryTarget(store, chat, role, requestedMessageId, deps.log)
       const userMessage = retryTarget?.userMessage
       if (!userMessage) throw new Error(requestedMessageId ? '该消息没有发送给这个人员' : '找不到可重试的用户消息')
-      if (retryTarget?.discardMessageId) discardMessage(store, chat, retryTarget.discardMessageId)
+      if (retryTarget?.discardMessageId) {
+        discardedAttachmentIds = readyAttachmentIds(store.messagesById[retryTarget.discardMessageId]?.attachments)
+        discardMessage(store, chat, retryTarget.discardMessageId)
+      }
 
       const roles = getChatRoles(store, chat)
       const messages = getChatMessages(store, chat)
@@ -248,6 +256,7 @@ export function createMessageHandlers(deps: MessageHandlersDependencies): Backgr
       return prepared
     })
 
+    await deleteAttachmentIdsBestEffort(deps, discardedAttachmentIds, 'role-retry-reply:attachment-cleanup-failed')
     await deps.broadcastStoreUpdated(store)
     const externalDelivery = 'externalDelivery' in result ? result.externalDelivery : undefined
     if (externalDelivery) {
@@ -534,60 +543,76 @@ export function createMessageHandlers(deps: MessageHandlersDependencies): Backgr
 
   const handleRoleReply = async (message: RuntimeMessage, sender: chrome.runtime.MessageSender) => {
     const identity = readIdentity(deps, message, sender)
-    const content = requireString(message.content, '回复内容不能为空')
+    const content = readReplyContent(message.content)
+    const images = readReplyImageSources(message.images)
+    if (!content && images.length === 0) throw new Error('回复内容不能为空')
+    if (images.length > 0 && !isBoundChatGptSender(deps, identity, message, sender)) throw new Error('图片回复只能来自已绑定的 ChatGPT 页面')
     const contentFormat = message.contentFormat === 'markdown' ? 'markdown' : undefined
     const promptMessageId = readOptionalString(message.messageId)
     const replyAttemptId = readOptionalString(message.replyAttemptId)
     const timestamp = deps.now()
-    deps.log.info('role-reply:received', { ...identity, promptMessageId, replyAttemptId, contentLength: content.length, senderUrl: sender.url })
+    const replyMessageId = deps.newId('msg')
+    const attachments = images.length > 0
+      ? await requireImageAttachmentService(deps).captureReplyImages({ chatId: identity.chatId, messageId: replyMessageId, images })
+      : undefined
+    deps.log.info('role-reply:received', { ...identity, promptMessageId, replyAttemptId, contentLength: content.length, imageCount: images.length, senderUrl: sender.url })
 
-    const { store, result } = await mutateStore(store => {
-      const chat = requireChat(store, identity.chatId)
-      const role = requireRole(store, chat.id, identity.roleId)
-      const staleReason = staleReplyReason(store, chat, role, promptMessageId, replyAttemptId)
-      if (staleReason) {
-        return { ignored: true as const, reason: staleReason, roleId: role.id, promptMessageId }
-      }
-
-      updateConversation(role, readOptionalString(message.conversationUrl), readOptionalString(message.conversationId))
-
-      const reply: GroupMessage = {
-        id: deps.newId('msg'),
-        chatId: chat.id,
-        seq: chat.nextMessageSeq,
-        type: 'assistant',
-        content,
-        contentFormat,
-        roleId: role.id,
-        roleName: role.name,
-        sourceMessageId: promptMessageId,
-        createdAt: timestamp,
-        status: 'received',
-      }
-      store.messagesById[reply.id] = reply
-      chat.messageIds.push(reply.id)
-      chat.nextMessageSeq += 1
-      markChatHasNewMessage(store, chat)
-
-      if (promptMessageId) {
-        const userMessage = store.messagesById[promptMessageId]
-        if (userMessage?.deliveryStatus?.[role.id]) {
-          userMessage.deliveryStatus[role.id] = 'received'
-          updateUserMessageDeliveryStatus(userMessage)
+    let mutation: Awaited<ReturnType<typeof mutateStore<{ ignored: true; reason: string; roleId: string; promptMessageId: string | undefined } | { ignored: false; reply: GroupMessage }>>>
+    try {
+      mutation = await mutateStore(store => {
+        const chat = requireChat(store, identity.chatId)
+        const role = requireRole(store, chat.id, identity.roleId)
+        const staleReason = staleReplyReason(store, chat, role, promptMessageId, replyAttemptId)
+        if (staleReason) {
+          return { ignored: true as const, reason: staleReason, roleId: role.id, promptMessageId }
         }
-      }
 
-      role.status = 'ready'
-      role.lastReplyAt = timestamp
-      role.updatedAt = timestamp
-      if (!promptMessageId || role.lastPromptMessageId === promptMessageId) delete role.lastPromptMessageId
-      if (!replyAttemptId || role.replyAttemptId === replyAttemptId) delete role.replyAttemptId
-      chat.status = deps.getChatStatusFromRoles(store, chat)
-      chat.updatedAt = timestamp
-      return { ignored: false as const, reply }
-    })
+        updateConversation(role, readOptionalString(message.conversationUrl), readOptionalString(message.conversationId))
+
+        const reply: GroupMessage = {
+          id: replyMessageId,
+          chatId: chat.id,
+          seq: chat.nextMessageSeq,
+          type: 'assistant',
+          content,
+          contentFormat,
+          ...(attachments?.length ? { attachments } : {}),
+          roleId: role.id,
+          roleName: role.name,
+          sourceMessageId: promptMessageId,
+          createdAt: timestamp,
+          status: 'received',
+        }
+        store.messagesById[reply.id] = reply
+        chat.messageIds.push(reply.id)
+        chat.nextMessageSeq += 1
+        markChatHasNewMessage(store, chat)
+
+        if (promptMessageId) {
+          const userMessage = store.messagesById[promptMessageId]
+          if (userMessage?.deliveryStatus?.[role.id]) {
+            userMessage.deliveryStatus[role.id] = 'received'
+            updateUserMessageDeliveryStatus(userMessage)
+          }
+        }
+
+        role.status = 'ready'
+        role.lastReplyAt = timestamp
+        role.updatedAt = timestamp
+        if (!promptMessageId || role.lastPromptMessageId === promptMessageId) delete role.lastPromptMessageId
+        if (!replyAttemptId || role.replyAttemptId === replyAttemptId) delete role.replyAttemptId
+        chat.status = deps.getChatStatusFromRoles(store, chat)
+        chat.updatedAt = timestamp
+        return { ignored: false as const, reply }
+      })
+    } catch (error) {
+      await deleteReadyAttachmentsBestEffort(deps, attachments, 'role-reply:attachment-cleanup-failed')
+      throw error
+    }
+    const { store, result } = mutation
 
     if (result.ignored) {
+      await deleteReadyAttachmentsBestEffort(deps, attachments, 'role-reply:attachment-cleanup-failed')
       deps.log.warn('role-reply:ignored-stale', { ...identity, promptMessageId: result.promptMessageId, reason: result.reason })
       return { ok: true, ignored: true, reason: result.reason, store }
     }
@@ -603,24 +628,40 @@ export function createMessageHandlers(deps: MessageHandlersDependencies): Backgr
   const handleRoleReplyResync = async (message: RuntimeMessage, sender: chrome.runtime.MessageSender) => {
     const identity = readIdentity(deps, message, sender)
     const messageId = requireString(message.messageId, '缺少消息 ID')
-    const content = requireString(message.content, '回复内容不能为空')
+    const content = readReplyContent(message.content)
+    const images = readReplyImageSources(message.images)
+    if (!content && images.length === 0) throw new Error('回复内容不能为空')
+    if (images.length > 0 && !isBoundChatGptSender(deps, identity, message, sender)) throw new Error('图片回复只能来自已绑定的 ChatGPT 页面')
     const contentFormat = message.contentFormat === 'markdown' ? 'markdown' : undefined
     const timestamp = deps.now()
-    deps.log.info('role-reply-resync:received', { ...identity, messageId, contentLength: content.length, senderUrl: sender.url })
+    const attachments = images.length > 0
+      ? await requireImageAttachmentService(deps).captureReplyImages({ chatId: identity.chatId, messageId, images })
+      : []
+    deps.log.info('role-reply-resync:received', { ...identity, messageId, contentLength: content.length, imageCount: images.length, senderUrl: sender.url })
 
-    const { store, result } = await mutateStore(store => {
-      const chat = requireChat(store, identity.chatId)
-      const role = requireRole(store, chat.id, identity.roleId)
-      const assistantMessage = store.messagesById[messageId]
-      if (!isAssistantMessageForRole(assistantMessage, chat, role)) throw new Error('该回复不属于这个人员')
+    let mutation: Awaited<ReturnType<typeof mutateStore<{ message: GroupMessage; previousAttachmentIds: string[] }>>>
+    try {
+      mutation = await mutateStore(store => {
+        const chat = requireChat(store, identity.chatId)
+        const role = requireRole(store, chat.id, identity.roleId)
+        const assistantMessage = store.messagesById[messageId]
+        if (!isAssistantMessageForRole(assistantMessage, chat, role)) throw new Error('该回复不属于这个人员')
 
-      updateConversation(role, readOptionalString(message.conversationUrl), readOptionalString(message.conversationId))
-      assistantMessage.content = content
-      assistantMessage.contentFormat = contentFormat
-      assistantMessage.status = 'received'
-      chat.updatedAt = timestamp
-      return { message: assistantMessage }
-    })
+        const previousAttachmentIds = readyAttachmentIds(assistantMessage.attachments)
+        updateConversation(role, readOptionalString(message.conversationUrl), readOptionalString(message.conversationId))
+        assistantMessage.content = content
+        assistantMessage.contentFormat = contentFormat
+        assistantMessage.attachments = attachments.length > 0 ? attachments : undefined
+        assistantMessage.status = 'received'
+        chat.updatedAt = timestamp
+        return { message: assistantMessage, previousAttachmentIds }
+      })
+    } catch (error) {
+      await deleteReadyAttachmentsBestEffort(deps, attachments, 'role-reply-resync:attachment-cleanup-failed')
+      throw error
+    }
+    const { store, result } = mutation
+    await deleteAttachmentIdsBestEffort(deps, result.previousAttachmentIds, 'role-reply-resync:previous-attachment-cleanup-failed')
 
     deps.log.info('role-reply-resync:stored', { chatId: result.message.chatId, roleId: result.message.roleId, replyMessageId: result.message.id })
     await deps.broadcastStoreUpdated(store)
@@ -1508,6 +1549,85 @@ function resolveReference(store: OpenTeamStore, chat: GroupChat, raw: unknown, n
 
 function readOptionalString(value: unknown): string | undefined {
   return typeof value === 'string' ? value.trim() || undefined : undefined
+}
+
+function readReplyContent(value: unknown): string {
+  return typeof value === 'string' ? value.trim() : ''
+}
+
+function readReplyImageSources(value: unknown): ReplyImageSource[] {
+  if (!Array.isArray(value)) return []
+  return value.slice(0, 20).flatMap(item => {
+    if (!isRecord(item) || typeof item.sourceUrl !== 'string' || !item.sourceUrl.trim()) return []
+    const width = readOptionalImageDimension(item.width)
+    const height = readOptionalImageDimension(item.height)
+    return [{
+      sourceUrl: item.sourceUrl.trim(),
+      ...(typeof item.alt === 'string' && item.alt.trim() ? { alt: item.alt.trim().slice(0, 500) } : {}),
+      ...(width ? { width } : {}),
+      ...(height ? { height } : {}),
+    }]
+  })
+}
+
+function readOptionalImageDimension(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isInteger(value) && value > 0 && value <= 20_000 ? value : undefined
+}
+
+function isChatGptSenderUrl(value: string | undefined): boolean {
+  if (!value) return false
+  try {
+    const url = new URL(value)
+    return url.protocol === 'https:' && (url.hostname === 'chatgpt.com' || url.hostname === 'chat.openai.com')
+  } catch {
+    return false
+  }
+}
+
+function isBoundChatGptSender(
+  deps: MessageHandlersDependencies,
+  identity: { chatId: string; roleId: string },
+  message: RuntimeMessage,
+  sender: chrome.runtime.MessageSender,
+): boolean {
+  if (!isChatGptSenderUrl(sender.url)) return false
+  const tabId = messageTabId(message, sender)
+  if (tabId === undefined) return false
+  const binding = deps.runtimeFrames.getByAddress(tabId, senderFrameId(sender))
+  return Boolean(binding?.ready && binding.chatId === identity.chatId && binding.roleId === identity.roleId)
+}
+
+function requireImageAttachmentService(deps: MessageHandlersDependencies): NonNullable<MessageHandlersDependencies['imageAttachments']> {
+  if (!deps.imageAttachments) throw new Error('图片存储尚未初始化')
+  return deps.imageAttachments
+}
+
+function readyAttachmentIds(attachments: MessageImageAttachment[] | undefined): string[] {
+  return (attachments ?? []).filter(attachment => attachment.status === 'ready').map(attachment => attachment.id)
+}
+
+async function deleteReadyAttachmentsBestEffort(
+  deps: MessageHandlersDependencies,
+  attachments: MessageImageAttachment[] | undefined,
+  event: string,
+): Promise<void> {
+  await deleteAttachmentIdsBestEffort(deps, readyAttachmentIds(attachments), event)
+}
+
+async function deleteAttachmentIdsBestEffort(
+  deps: MessageHandlersDependencies,
+  ids: string[],
+  event: string,
+): Promise<void> {
+  if (ids.length === 0 || !deps.imageAttachments) return
+  try {
+    await deps.imageAttachments.deleteByIds(ids)
+  } catch (error) {
+    deps.log.warn(event, {
+      attachmentCount: ids.length,
+      error: error instanceof Error ? error.message : String(error),
+    })
+  }
 }
 
 function requireString(value: unknown, error: string): string {

@@ -13,6 +13,8 @@ afterEach(() => {
   window.getSelection()?.removeAllRanges()
   document.body.replaceChildren()
   vi.useRealTimers()
+  vi.restoreAllMocks()
+  vi.unstubAllGlobals()
 })
 
 function settleMarkMenuTimer(): void {
@@ -34,6 +36,17 @@ describe('team page messages view boundary', () => {
     expect(entrySource).not.toContain('function renderMessageNode(message: GroupMessage')
     expect(entrySource).not.toContain('function renderMarkdownMessageBody(body: HTMLElement, content: string)')
     expect(entrySource).not.toContain('function scheduleThinkingTimeouts(): void')
+  })
+
+  it('keeps the image download action pinned inside the image tile', () => {
+    const css = readFileSync(resolve(process.cwd(), 'public/team.css'), 'utf8')
+    const selectorIndex = css.indexOf('.message-image-download.message-tool-btn')
+    expect(selectorIndex).toBeGreaterThan(-1)
+
+    const rule = css.slice(selectorIndex, css.indexOf('}', selectorIndex))
+    expect(rule).toContain('position: absolute')
+    expect(rule).toContain('right: 8px')
+    expect(rule).toContain('bottom: 8px')
   })
 
   it('does not mark a role as failed from the UI when a thinking bubble expires', () => {
@@ -165,6 +178,130 @@ describe('team page messages view boundary', () => {
     }).renderMessages()
 
     expect(messagesEl.querySelector('.markdown-body strong')?.textContent).toBe('重点')
+  })
+
+  it('renders pure image replies as an adaptive grid with preview, download, and failure states', async () => {
+    const now = Date.now()
+    const chat: GroupChat = {
+      id: 'chat-1',
+      name: '群聊',
+      mode: 'independent',
+      roleIds: ['role-1'],
+      messageIds: ['msg-image'],
+      nextMessageSeq: 2,
+      status: 'ready',
+      createdAt: now,
+      updatedAt: now,
+    }
+    const role: GroupRole = {
+      id: 'role-1',
+      chatId: chat.id,
+      chatSite: 'chatgpt',
+      name: '视觉设计师',
+      status: 'ready',
+      contextCursor: 0,
+      createdAt: now,
+      updatedAt: now,
+    }
+    const message: GroupMessage = {
+      id: 'msg-image',
+      chatId: chat.id,
+      seq: 1,
+      type: 'assistant',
+      content: '',
+      roleId: role.id,
+      roleName: role.name,
+      attachments: [
+        {
+          id: 'attachment-ready',
+          type: 'image',
+          status: 'ready',
+          alt: '已生成图片：产品草图',
+          width: 1024,
+          height: 1024,
+          mimeType: 'image/png',
+          size: 5,
+          fileName: 'chatgpt-image-1.png',
+        },
+        {
+          id: 'attachment-error',
+          type: 'image',
+          status: 'error',
+          error: '图片获取失败',
+        },
+      ],
+      createdAt: now,
+      status: 'received',
+    }
+    const store: OpenTeamStore = {
+      ...createDefaultStore(),
+      currentChatId: chat.id,
+      chatOrder: [chat.id],
+      chatsById: { [chat.id]: chat },
+      rolesById: { [role.id]: role },
+      messagesById: { [message.id]: message },
+    }
+    const messagesEl = document.createElement('section')
+    document.body.append(messagesEl)
+    const open = vi.spyOn(window, 'open').mockImplementation(() => null)
+    const createObjectURL = vi.fn(() => 'blob:openteam-image')
+    const revokeObjectURL = vi.fn()
+    const NativeURL = URL
+    class MockURL extends NativeURL {
+      static createObjectURL = createObjectURL
+      static revokeObjectURL = revokeObjectURL
+    }
+    vi.stubGlobal('URL', MockURL)
+
+    createMessagesView({
+      state: createTeamPageState(),
+      getStore: () => store,
+      messagesEl,
+      getCurrentChat: () => chat,
+      getCurrentRoles: () => [role],
+      getCurrentMessages: () => [message],
+      emptyCard: () => document.createElement('div'),
+      openAddPersonDialog: vi.fn(),
+      roleToneClass: () => 'role-tone-1',
+      roleAvatarLabel: () => '视',
+      messageTitle: currentMessage => currentMessage.roleName ?? 'AI 人员',
+      focusRoleFrame: vi.fn(),
+      insertMention: vi.fn(),
+      setReference: vi.fn(),
+      resyncMessageReply: vi.fn(async () => undefined),
+      retryRoleReply: vi.fn(async () => undefined),
+      stopRoleReply: vi.fn(async () => undefined),
+      loadImageAttachment: vi.fn(async () => ({
+        id: 'attachment-ready',
+        chatId: chat.id,
+        messageId: message.id,
+        blob: new Blob(['image'], { type: 'image/png' }),
+        mimeType: 'image/png',
+        size: 5,
+        fileName: 'chatgpt-image-1.png',
+        createdAt: now,
+      })),
+      runCommand: vi.fn(async () => undefined),
+      render: vi.fn(),
+      showError: vi.fn(),
+      showSuccess: vi.fn(),
+      log: { warn: vi.fn() },
+    }).renderMessages()
+
+    const grid = messagesEl.querySelector('.message-image-grid.image-count-2')
+    expect(grid).not.toBeNull()
+    await vi.waitFor(() => {
+      expect(grid?.querySelector('img')?.getAttribute('src')).toBe('blob:openteam-image')
+    })
+    expect(grid?.querySelector('.message-image-error')?.textContent).toContain('图片获取失败')
+    expect(messagesEl.querySelector('.message-body')).toBeNull()
+    expect(messagesEl.querySelector('[aria-label="复制回复"]')).toBeNull()
+    expect(messagesEl.querySelector('[aria-label="引用回复"]')).toBeNull()
+    expect(messagesEl.querySelector('[aria-label="下载图片"]')).not.toBeNull()
+
+    const preview = messagesEl.querySelector<HTMLButtonElement>('[aria-label="预览图片"]')
+    preview?.click()
+    expect(open).toHaveBeenCalledWith('blob:openteam-image', '_blank', 'noopener')
   })
 
   it('renders assistant html table fragments as visible markdown tables', () => {

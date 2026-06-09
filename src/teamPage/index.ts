@@ -26,8 +26,10 @@ import { createThemeController } from './themeController'
 import { createTeamUiController } from './teamUiController'
 import { emptyCard, getChatRecentSummary as getStoreChatRecentSummary, messageTitle, roleAvatarLabel, roleToneClass } from './viewHelpers'
 import { agentControlStatusState, agentControlStatusText } from './agentControlStatusView'
+import { createIndexedDbImageAttachmentRepository } from '../shared/imageAttachmentRepository'
 
 const appState = createTeamPageState()
+const imageAttachmentRepository = createIndexedDbImageAttachmentRepository()
 
 let store: OpenTeamStore = appState.store
 
@@ -416,6 +418,7 @@ const messagesView = createMessagesView({
   resyncMessageReply,
   retryRoleReply,
   stopRoleReply,
+  loadImageAttachment: id => imageAttachmentRepository.get(id),
   runCommand,
   render,
   showError,

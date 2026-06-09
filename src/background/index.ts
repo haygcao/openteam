@@ -24,6 +24,8 @@ import { createLogger } from '../shared/logger'
 import type { BackgroundToRoleMessage } from '../group/runtimeProtocol'
 import { createControlActionExecutor } from './controlHandlers'
 import { createControlClient } from './controlClient'
+import { createImageAttachmentService } from './imageAttachments'
+import { createIndexedDbImageAttachmentRepository } from '../shared/imageAttachmentRepository'
 
 const runtimeFrames = createRuntimeFrameRegistry()
 const log = createLogger('background')
@@ -33,6 +35,15 @@ const CONTROL_KEEPALIVE_PERIOD_MINUTES = 0.4
 const sendPrompt = createPromptSender({ log })
 const promptDeliveryLimiter = createSitePromptDeliveryLimiter({ log })
 const externalModelClient = createExternalModelClient()
+const imageAttachmentRepository = createIndexedDbImageAttachmentRepository()
+const imageAttachments = createImageAttachmentService({
+  fetchImage(url, init) {
+    return fetch(url, init)
+  },
+  repository: imageAttachmentRepository,
+  newId: () => newId('attachment'),
+  now,
+})
 
 function sendRoleMessage(tabId: number, frameId: number, message: BackgroundToRoleMessage): Promise<unknown> {
   return chrome.tabs.sendMessage(tabId, message, { frameId })
@@ -119,12 +130,12 @@ function sendResponseSafely(sendResponse: (response?: unknown) => void, response
 
 const routeMessage = createMessageRouter([
   { type: 'GROUP_STORE_GET', handler: handleStoreGet },
-  ...createChatHandlers({ broadcastStoreUpdated, getChatStatusFromRoles, log, newId, now, runtimeFrames }),
+  ...createChatHandlers({ broadcastStoreUpdated, getChatStatusFromRoles, imageAttachments: imageAttachmentRepository, log, newId, now, runtimeFrames }),
   { type: 'GROUP_SETTINGS_UPDATE', handler: handleSettingsUpdate },
   ...createExternalModelHandlers({ broadcastStoreUpdated, externalModelClient, newId, now }),
   ...createRoleHandlers({ broadcastStoreUpdated, externalModelClient, log, newId, now, runtimeFrames, sendPrompt }),
   ...createOrchestrationHandlers({ broadcastStoreUpdated, broadcastAutoGenerateStream, externalModelClient, getChatStatusFromRoles, log, newId, now, promptDeliveryLimiter, requestRoleRecovery, runtimeFrames, sendPrompt }),
-  ...createMessageHandlers({ broadcastStoreUpdated, externalModelClient, getChatStatusFromRoles, log, newId, now, promptDeliveryLimiter, requestRoleRecovery, runtimeFrames, sendError, sendPrompt, sendRoleMessage }),
+  ...createMessageHandlers({ broadcastStoreUpdated, externalModelClient, getChatStatusFromRoles, imageAttachments, log, newId, now, promptDeliveryLimiter, requestRoleRecovery, runtimeFrames, sendError, sendPrompt, sendRoleMessage }),
 ])
 
 const executeControlCommand = createControlActionExecutor({
@@ -166,6 +177,19 @@ const controlClient = createControlClient({
   },
 })
 let controlClientInitialized = false
+
+cleanupOrphanedImageAttachments().catch(error => {
+  log.warn('image-attachments:orphan-cleanup-failed', { error: errorReason(error) })
+})
+
+async function cleanupOrphanedImageAttachments(): Promise<void> {
+  const store = await loadStore()
+  const referencedIds = new Set(Object.values(store.messagesById)
+    .flatMap(message => message.attachments ?? [])
+    .filter(attachment => attachment.status === 'ready')
+    .map(attachment => attachment.id))
+  await imageAttachmentRepository.deleteOrphans(referencedIds)
+}
 
 function syncControlClient(): Promise<void> {
   log.info('control-client:sync')

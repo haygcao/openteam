@@ -179,6 +179,111 @@ describe('ChatGPT site adapter', () => {
     expect(createChatGptAdapter().readResponseMarkdown?.(response)).toBe('## 方案\n\n**结论**：可以做\n\n- 先做复制\n- 再做兜底\n\n```\nconst ok = true\n```')
   })
 
+  it('extracts and deduplicates generated images from ChatGPT image turns', () => {
+    document.body.innerHTML = `
+      <div class="agent-turn">
+        <div data-conversation-screenshot-content>
+          <div class="group/imagegen-image">
+            <img
+              id="generated-image"
+              width="1254"
+              height="1254"
+              alt="已生成图片：温馨午餐时光的小猫"
+              src="https://chatgpt.com/backend-api/estuary/content?id=file-image&sig=signed"
+            >
+            <img
+              width="1254"
+              height="1254"
+              alt=""
+              aria-hidden="true"
+              src="https://chatgpt.com/backend-api/estuary/content?id=file-image&sig=signed"
+            >
+            <img
+              alt=""
+              aria-hidden="true"
+              src="https://chatgpt.com/backend-api/estuary/content?id=file-image&sig=signed"
+            >
+          </div>
+          <button aria-label="编辑图片">编辑</button>
+        </div>
+      </div>
+    `
+
+    const adapter = createChatGptAdapter()
+    const responses = adapter.getResponseContainers()
+
+    expect(responses).toHaveLength(1)
+    expect(responses[0]).toBe(document.querySelector('[data-conversation-screenshot-content]'))
+    expect(adapter.readResponseImages?.(responses[0])).toEqual([
+      {
+        sourceUrl: 'https://chatgpt.com/backend-api/estuary/content?id=file-image&sig=signed',
+        alt: '已生成图片：温馨午餐时光的小猫',
+        width: 1254,
+        height: 1254,
+      },
+    ])
+  })
+
+  it('keeps standalone image turns when older text turns are also present', () => {
+    document.body.innerHTML = `
+      <section data-turn="assistant" data-testid="conversation-turn-1">
+        <div data-message-author-role="assistant" data-message-id="reply-1">旧的文字回复</div>
+      </section>
+      <div class="agent-turn">
+        <div data-conversation-screenshot-content>
+          <img
+            alt="已生成图片"
+            src="https://chatgpt.com/backend-api/estuary/content?id=file-image"
+          >
+        </div>
+      </div>
+    `
+
+    const responses = createChatGptAdapter().getResponseContainers()
+
+    expect(responses).toHaveLength(2)
+    expect(responses[1]).toBe(document.querySelector('[data-conversation-screenshot-content]'))
+  })
+
+  it('does not treat the user prompt screenshot container as an image reply', () => {
+    document.body.innerHTML = `
+      <section data-turn="user" data-testid="conversation-turn-1">
+        <div data-conversation-screenshot-content>
+          <p id="user-prompt">画一个可爱的小猫</p>
+        </div>
+      </section>
+      <section
+        data-turn="assistant"
+        data-turn-id="request-WEB:image-request"
+        data-testid="conversation-turn-2"
+      >
+        <div data-conversation-screenshot-content>
+          <button type="button">Thought for 35s</button>
+          <div class="group/imagegen-image">
+            <img
+              width="1254"
+              height="1254"
+              alt="已生成图片：可爱小猫咪的梦幻时光"
+              src="https://chatgpt.com/backend-api/estuary/content?id=file-image"
+            >
+          </div>
+          <div aria-label="回复操作" role="group">
+            <button data-testid="copy-turn-action-button" aria-label="复制回复">复制回复</button>
+          </div>
+        </div>
+      </section>
+    `
+
+    const adapter = createChatGptAdapter()
+    const responses = adapter.getResponseContainers()
+
+    expect(responses).toEqual([
+      document.querySelector('section[data-turn="assistant"] [data-conversation-screenshot-content]'),
+    ])
+    expect(adapter.getAllAssistantReplies()).toEqual([])
+    expect(adapter.findResponseContainer(document.querySelector('#user-prompt'))).toBeNull()
+  })
+
   it('treats ChatGPT streaming busy indicators as generating even without a visible stop button', () => {
     document.body.innerHTML = `
       <section data-turn="assistant" data-testid="conversation-turn-2">

@@ -184,6 +184,61 @@ describe('createReplyObserver', () => {
     vi.useRealTimers()
   })
 
+  it('reports a pure image reply after generation settles', async () => {
+    vi.useFakeTimers()
+    document.body.innerHTML = `
+      <message-content id="image-reply">
+        <img
+          alt="已生成图片：产品草图"
+          width="1024"
+          height="1024"
+          src="https://chatgpt.com/backend-api/estuary/content?id=file-image&sig=signed"
+        >
+      </message-content>
+    `
+
+    const sentMessages: RoleToBackgroundMessage[] = []
+    const roleSession = createFakeRoleSession()
+    const observer = createReplyObserver({
+      siteAdapter: createFakeAdapter({
+        isGenerating: () => false,
+        readResponseImages: node => [...(node as Element).querySelectorAll<HTMLImageElement>('img')].map(image => ({
+          sourceUrl: image.src,
+          alt: image.alt,
+          width: image.width,
+          height: image.height,
+        })),
+      }),
+      roleSession,
+      log: createFakeLog(),
+      sendRuntimeMessage: async message => {
+        sentMessages.push(message)
+        return { ok: true } as never
+      },
+      reportRoleError: vi.fn(),
+    })
+
+    roleSession.startPrompt('msg-image', 'attempt-image')
+    observer.startReplyPolling('msg-image', 'attempt-image')
+
+    await vi.advanceTimersByTimeAsync(8_000)
+
+    expect(sentMessages).toContainEqual(expect.objectContaining({
+      type: 'TEAM_ROLE_REPLY',
+      messageId: 'msg-image',
+      replyAttemptId: 'attempt-image',
+      content: '',
+      images: [{
+        sourceUrl: 'https://chatgpt.com/backend-api/estuary/content?id=file-image&sig=signed',
+        alt: '已生成图片：产品草图',
+        width: 1024,
+        height: 1024,
+      }],
+    }))
+
+    vi.useRealTimers()
+  })
+
   it('extends the reply timeout while the page is still generating', async () => {
     vi.useFakeTimers()
     document.body.innerHTML = '<message-content id="new">先输出的一段内容，仍在思考后续。</message-content>'

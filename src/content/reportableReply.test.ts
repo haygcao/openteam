@@ -24,6 +24,26 @@ describe('readResyncReplyText', () => {
 
     expect(result.text).toBe('这是页面上最后一条完整回复。')
   })
+
+  it('resyncs a pure image reply when the current message has no text', async () => {
+    const imageReply = appendReply('')
+    imageReply.innerHTML = '<img src="https://chatgpt.com/backend-api/estuary/content?id=image">'
+    const adapter = makeAdapter([imageReply])
+    adapter.readResponseImages = () => [{
+      sourceUrl: 'https://chatgpt.com/backend-api/estuary/content?id=image',
+      alt: '已生成图片',
+    }]
+
+    const result = await readResyncReplyText(adapter, '', { debug: vi.fn(), info: vi.fn(), warn: vi.fn() })
+
+    expect(result).toEqual({
+      text: '',
+      images: [{
+        sourceUrl: 'https://chatgpt.com/backend-api/estuary/content?id=image',
+        alt: '已生成图片',
+      }],
+    })
+  })
 })
 
 function appendReply(text: string): HTMLElement {

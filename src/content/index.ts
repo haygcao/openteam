@@ -166,6 +166,7 @@ function handleResyncReplyMessage(message: Extract<BackgroundToRoleMessage, { ty
         messageId: message.messageId,
         content: reply.text,
         contentFormat: reply.contentFormat,
+        images: reply.images,
         conversationId: snapshot.conversationId,
         conversationUrl: snapshot.conversationUrl,
       })

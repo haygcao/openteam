@@ -26,6 +26,10 @@ export interface ChatHandlersDependencies {
   newId(prefix: string): string
   now(): number
   runtimeFrames: Pick<RuntimeFrameRegistry, 'removeRole'>
+  imageAttachments?: {
+    deleteByMessageIds(messageIds: string[]): Promise<void>
+    deleteByChatId(chatId: string): Promise<void>
+  }
 }
 
 export function createChatHandlers(deps: ChatHandlersDependencies): BackgroundMessageRoute[] {
@@ -110,6 +114,14 @@ export function createChatHandlers(deps: ChatHandlersDependencies): BackgroundMe
 
       return { chatId: chat.id, roleIds, messageIds }
     })
+    try {
+      await deps.imageAttachments?.deleteByChatId(result.chatId)
+    } catch (error) {
+      deps.log.warn('chat-delete:image-cleanup-failed', {
+        chatId: result.chatId,
+        error: error instanceof Error ? error.message : String(error),
+      })
+    }
     deps.log.info('chat-delete:stored', { chatId: result.chatId, roleCount: result.roleIds.length, messageCount: result.messageIds.length })
     await deps.broadcastStoreUpdated(store)
     return { ok: true, chatId: result.chatId, store }
@@ -145,6 +157,14 @@ export function createChatHandlers(deps: ChatHandlersDependencies): BackgroundMe
       markChatRead(store, chat)
       return { chatId: chat.id, roleIds, messageIds }
     })
+    try {
+      await deps.imageAttachments?.deleteByMessageIds(result.messageIds)
+    } catch (error) {
+      deps.log.warn('chat-clear-messages:image-cleanup-failed', {
+        chatId: result.chatId,
+        error: error instanceof Error ? error.message : String(error),
+      })
+    }
     deps.log.info('chat-clear-messages:stored', { chatId: result.chatId, roleCount: result.roleIds.length, messageCount: result.messageIds.length })
     await deps.broadcastStoreUpdated(store)
     return { ok: true, chatId: result.chatId, store }

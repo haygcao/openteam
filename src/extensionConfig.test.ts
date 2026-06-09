@@ -75,6 +75,7 @@ describe('extension security configuration', () => {
     }
 
     expect(manifest.permissions).toContain('alarms')
+    expect(manifest.permissions).toContain('unlimitedStorage')
   })
 
   it('limits iframe header overrides to supported AI chat subframes', () => {

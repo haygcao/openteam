@@ -282,6 +282,27 @@ export interface GroupMessage {
   createdAt: number
   status: DeliveryStatus
   deliveryStatus?: Record<string, DeliveryStatus>
+  attachments?: MessageImageAttachment[]
+}
+
+export interface ReplyImageSource {
+  sourceUrl: string
+  alt?: string
+  width?: number
+  height?: number
+}
+
+export interface MessageImageAttachment {
+  id: string
+  type: 'image'
+  status: 'ready' | 'error'
+  alt?: string
+  width?: number
+  height?: number
+  mimeType?: string
+  size?: number
+  fileName?: string
+  error?: string
 }
 
 export interface MessageReference {

@@ -2,11 +2,12 @@ import MarkdownIt from 'markdown-it'
 import { extractMarkdownFromDom } from '../content/sites/domMarkdown'
 import { DEFAULT_MESSAGE_HIGHLIGHT_COLOR, MESSAGE_HIGHLIGHT_COLORS, messageHighlightColorRgb, type MessageHighlightColor } from '../group/highlightColors'
 import { roleMentionLabel, roleMentionLabelOptionsFromSettings, roleModelLabel } from '../group/mentionParser'
-import type { GroupChat, GroupMessage, GroupRole, MessageHighlight, MessageReference, OpenTeamStore, OrchestrationReviewResult } from '../group/types'
+import type { GroupChat, GroupMessage, GroupRole, MessageHighlight, MessageImageAttachment, MessageReference, OpenTeamStore, OrchestrationReviewResult } from '../group/types'
+import type { ImageAttachmentBlobRecord } from '../shared/imageAttachmentRepository'
 import type { TeamPageState } from './appState'
 import { buildChatRenderItems, getChatStartupNotice, getStoppedReplyRoles, getVisibleThinkingRoles, THINKING_TIMEOUT_MS } from './chatExperience'
 
-type MessageActionIcon = 'copy' | 'quote' | 'jump' | 'check' | 'stop' | 'retry'
+type MessageActionIcon = 'copy' | 'quote' | 'jump' | 'check' | 'stop' | 'retry' | 'download'
 
 const MAX_CACHED_MESSAGE_NODES = 400
 const COPY_FEEDBACK_MS = 1200
@@ -35,6 +36,7 @@ export interface MessagesViewDependencies {
   resyncMessageReply(message: GroupMessage): Promise<void>
   retryRoleReply(role: GroupRole, messageId?: string): Promise<void>
   stopRoleReply(role: GroupRole): Promise<void>
+  loadImageAttachment?(id: string): Promise<ImageAttachmentBlobRecord | undefined>
   runCommand(type: string, payload?: Record<string, unknown>): Promise<void>
   render(): void
   showError(message: string): void
@@ -70,10 +72,13 @@ export function createMessagesView(deps: MessagesViewDependencies): MessagesView
   let selectionDragActive = false
   let ignoreNextDocumentClick = false
   let markMenuUpdateTimer: number | undefined
+  const imageObjectUrls = new Map<string, string>()
+  const imageLoadPromises = new Map<string, Promise<string | undefined>>()
 
   function renderMessages(): void {
     const chat = deps.getCurrentChat()
     const messages = deps.getCurrentMessages()
+    releaseUnusedImageUrls(messages)
     const preserveScroll = deps.state.preserveNextMessageScroll
     const previousScrollTop = deps.messagesEl.scrollTop
     const shouldFollowNewReplies = isScrolledNearBottom(deps.messagesEl)
@@ -205,7 +210,10 @@ export function createMessagesView(deps: MessagesViewDependencies): MessagesView
       renderPlainMessageBody(body, message.content)
     }
     renderSavedHighlights(body, message)
-    bubble.append(body)
+    const hasVisibleTextBody = message.status === 'pending' || Boolean(message.content.trim())
+    if (hasVisibleTextBody) bubble.append(body)
+    const imageGrid = renderMessageImageGrid(message)
+    if (imageGrid) bubble.append(imageGrid)
     const reviewSummary = renderOrchestrationReviewSummary(message)
     if (reviewSummary) bubble.append(reviewSummary)
     if (message.references?.length) bubble.append(referenceBox(message.references[0]))
@@ -224,8 +232,10 @@ export function createMessagesView(deps: MessagesViewDependencies): MessagesView
         tools.append(createMessageIconButton('跳转到原始窗口', 'jump', () => deps.focusRoleFrame(message.chatId, message.roleId)))
         tools.append(createMessageIconButton('重新同步完整回复', 'retry', () => handleResyncMessage(message)))
       }
-      tools.append(createMessageIconButton('引用回复', 'quote', () => deps.setReference(message)))
-      tools.append(createMessageIconButton('复制回复', 'copy', button => handleCopyMessage(button, message)))
+      if (message.content.trim()) {
+        tools.append(createMessageIconButton('引用回复', 'quote', () => deps.setReference(message)))
+        tools.append(createMessageIconButton('复制回复', 'copy', button => handleCopyMessage(button, message)))
+      }
       bubble.append(tools)
     }
 
@@ -272,6 +282,123 @@ export function createMessagesView(deps: MessagesViewDependencies): MessagesView
 
   function renderPlainMessageBody(body: HTMLElement, content: string): void {
     body.append(document.createTextNode(content))
+  }
+
+  function renderMessageImageGrid(message: GroupMessage): HTMLElement | undefined {
+    const attachments = message.attachments?.filter(attachment => attachment.type === 'image') ?? []
+    if (attachments.length === 0) return undefined
+
+    const grid = document.createElement('div')
+    grid.className = `message-image-grid image-count-${Math.min(attachments.length, 4)}`
+    for (const attachment of attachments) {
+      grid.append(renderImageAttachment(message, attachment))
+    }
+    return grid
+  }
+
+  function renderImageAttachment(message: GroupMessage, attachment: MessageImageAttachment): HTMLElement {
+    const tile = document.createElement('div')
+    tile.className = `message-image-tile ${attachment.status === 'error' ? 'message-image-error' : 'message-image-loading'}`
+
+    if (attachment.status === 'error') {
+      const errorText = document.createElement('span')
+      errorText.textContent = attachment.error || '图片获取失败'
+      const retry = document.createElement('button')
+      retry.type = 'button'
+      retry.className = 'message-image-retry'
+      retry.textContent = '重新同步'
+      retry.addEventListener('click', event => {
+        event.stopPropagation()
+        handleResyncMessage(message)
+      })
+      tile.append(errorText, retry)
+      return tile
+    }
+
+    const preview = document.createElement('button')
+    preview.type = 'button'
+    preview.className = 'message-image-preview'
+    preview.setAttribute('aria-label', '预览图片')
+    preview.disabled = true
+    const image = document.createElement('img')
+    image.alt = attachment.alt || 'ChatGPT 生成图片'
+    image.loading = 'lazy'
+    image.decoding = 'async'
+    if (attachment.width) image.width = attachment.width
+    if (attachment.height) image.height = attachment.height
+    preview.append(image)
+
+    const download = createMessageIconButton('下载图片', 'download', () => {
+      downloadImageAttachment(attachment).catch(error => deps.showError(error instanceof Error ? error.message : String(error)))
+    })
+    download.classList.add('message-image-download')
+    download.disabled = true
+    tile.append(preview, download)
+
+    loadImageObjectUrl(attachment.id)
+      .then(url => {
+        if (!url || !tile.isConnected) {
+          if (url && !tile.isConnected) releaseImageUrl(attachment.id)
+          return
+        }
+        image.src = url
+        preview.disabled = false
+        download.disabled = false
+        tile.classList.remove('message-image-loading')
+        preview.addEventListener('click', () => window.open(url, '_blank', 'noopener'))
+      })
+      .catch(error => {
+        tile.className = 'message-image-tile message-image-error'
+        tile.replaceChildren()
+        const errorText = document.createElement('span')
+        errorText.textContent = error instanceof Error ? error.message : '图片读取失败'
+        tile.append(errorText)
+      })
+
+    return tile
+  }
+
+  async function loadImageObjectUrl(attachmentId: string): Promise<string | undefined> {
+    const cached = imageObjectUrls.get(attachmentId)
+    if (cached) return cached
+    const pending = imageLoadPromises.get(attachmentId)
+    if (pending) return pending
+
+    const load = (async () => {
+      const record = await deps.loadImageAttachment?.(attachmentId)
+      if (!record) throw new Error('本地图片不可用，请重新同步')
+      const url = URL.createObjectURL(record.blob)
+      imageObjectUrls.set(attachmentId, url)
+      return url
+    })().finally(() => {
+      imageLoadPromises.delete(attachmentId)
+    })
+    imageLoadPromises.set(attachmentId, load)
+    return load
+  }
+
+  async function downloadImageAttachment(attachment: MessageImageAttachment): Promise<void> {
+    const url = await loadImageObjectUrl(attachment.id)
+    if (!url) throw new Error('本地图片不可用，请重新同步')
+    const anchor = document.createElement('a')
+    anchor.href = url
+    anchor.download = attachment.fileName || 'chatgpt-image.png'
+    anchor.rel = 'noreferrer'
+    anchor.click()
+  }
+
+  function releaseUnusedImageUrls(messages: GroupMessage[]): void {
+    const activeIds = new Set(messages.flatMap(message => message.attachments ?? []).filter(attachment => attachment.status === 'ready').map(attachment => attachment.id))
+    for (const attachmentId of imageObjectUrls.keys()) {
+      if (!activeIds.has(attachmentId)) releaseImageUrl(attachmentId)
+    }
+  }
+
+  function releaseImageUrl(attachmentId: string): void {
+    const url = imageObjectUrls.get(attachmentId)
+    if (!url) return
+    URL.revokeObjectURL(url)
+    imageObjectUrls.delete(attachmentId)
   }
 
   function renderSavedHighlights(body: HTMLElement, message: GroupMessage): void {
@@ -346,6 +473,7 @@ export function createMessagesView(deps: MessagesViewDependencies): MessagesView
     if (icon === 'check') return 'M9.2 16.4 4.8 12l1.4-1.4 3 3 8.6-8.6 1.4 1.4-10 10Z'
     if (icon === 'stop') return 'M7.5 6h9A1.5 1.5 0 0 1 18 7.5v9a1.5 1.5 0 0 1-1.5 1.5h-9A1.5 1.5 0 0 1 6 16.5v-9A1.5 1.5 0 0 1 7.5 6Z'
     if (icon === 'retry') return 'M12 5a7 7 0 1 1-6.3 4H4a9 9 0 1 0 2.6-4.4L4 2v7h7L8.1 6.1A7 7 0 0 1 12 5Z'
+    if (icon === 'download') return 'M11 4h2v8.2l2.6-2.6L17 11l-5 5-5-5 1.4-1.4 2.6 2.6V4Zm-5 13h12v2H6v-2Z'
     return 'M14 5h5v5h-1.6V7.7l-7.1 7.1-1.1-1.1 7.1-7.1H14V5ZM6.5 6h4v1.6h-4a.9.9 0 0 0-.9.9v9a.9.9 0 0 0 .9.9h9a.9.9 0 0 0 .9-.9v-4H18v4A2.5 2.5 0 0 1 15.5 20h-9A2.5 2.5 0 0 1 4 17.5v-9A2.5 2.5 0 0 1 6.5 6Z'
   }
 
@@ -473,6 +601,7 @@ export function createMessagesView(deps: MessagesViewDependencies): MessagesView
       roleSite: roleForMessage(message)?.chatSite,
       content: message.content,
       contentFormat: message.contentFormat,
+      attachments: message.attachments,
       createdAt: message.createdAt,
       status: message.status,
       references: message.references,

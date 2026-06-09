@@ -21,6 +21,7 @@ export function getUnsyncedMessagesForRole(
     .filter((message): message is GroupMessage => Boolean(message))
     .filter(message => message.seq > role.contextCursor && message.id !== userMessage.id && message.roleId !== role.id)
     .filter(message => isMessageVisibleToRole(message, role.id))
+    .filter(message => Boolean(message.content.trim()))
 }
 
 export function buildUnsyncedContext(

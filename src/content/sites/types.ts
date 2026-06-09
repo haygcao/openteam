@@ -1,4 +1,5 @@
 import type { SiteStatus } from '../../group/runtimeProtocol'
+import type { ReplyImageSource } from '../../group/types'
 
 export interface SiteStatusInfo {
   status: SiteStatus
@@ -18,6 +19,7 @@ export interface ChatSiteAdapter {
   getResponseContainers(): Element[]
   getAllAssistantReplies(): string[]
   readResponseText(node: Node): string
+  readResponseImages?(node: Node): ReplyImageSource[]
   readResponseTextFromCopy?(node: Node): Promise<string | undefined>
   readResponseMarkdown?(node: Node): string
   findResponseContainer(element: Element | null): Element | null
