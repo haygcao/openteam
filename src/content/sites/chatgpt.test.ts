@@ -284,6 +284,126 @@ describe('ChatGPT site adapter', () => {
     expect(adapter.findResponseContainer(document.querySelector('#user-prompt'))).toBeNull()
   })
 
+  it('keeps assistant screenshot text turns after an image reply', () => {
+    document.body.innerHTML = `
+      <section data-turn="assistant" data-testid="conversation-turn-2">
+        <div data-conversation-screenshot-content>
+          <div class="group/imagegen-image">
+            <img
+              alt="已生成图片：可爱小猫咪"
+              src="https://chatgpt.com/backend-api/estuary/content?id=file-image"
+            >
+          </div>
+        </div>
+      </section>
+      <section data-turn="user" data-testid="conversation-turn-3">
+        <div data-conversation-screenshot-content>
+          <p id="user-follow-up">再描述一下这张图</p>
+        </div>
+      </section>
+      <section data-turn="assistant" data-testid="conversation-turn-4">
+        <div data-conversation-screenshot-content>
+          <div class="markdown">
+            <p id="assistant-follow-up">这是一只毛茸茸的小猫，正在柔和的灯光下看向镜头。</p>
+          </div>
+          <div aria-label="回复操作" role="group">
+            <button data-testid="copy-turn-action-button" aria-label="复制回复">复制回复</button>
+          </div>
+        </div>
+      </section>
+    `
+
+    const adapter = createChatGptAdapter()
+    const responses = adapter.getResponseContainers()
+
+    expect(responses).toEqual([
+      document.querySelector('section[data-testid="conversation-turn-2"] [data-conversation-screenshot-content]'),
+      document.querySelector('section[data-testid="conversation-turn-4"] [data-conversation-screenshot-content]'),
+    ])
+    expect(adapter.getAllAssistantReplies()).toEqual(['这是一只毛茸茸的小猫，正在柔和的灯光下看向镜头。'])
+    expect(adapter.findResponseContainer(document.querySelector('#assistant-follow-up'))).toBe(responses[1])
+    expect(adapter.findResponseContainer(document.querySelector('#user-follow-up'))).toBeNull()
+  })
+
+  it('extracts multiple generated images from the selected image and thumbnail strip', () => {
+    document.body.innerHTML = `
+      <section data-turn="assistant" data-testid="conversation-turn-6">
+        <div data-conversation-screenshot-content>
+          <div class="group/imagegen-image">
+            <img
+              width="1254"
+              height="1254"
+              alt="已生成图片"
+              src="https://chatgpt.com/backend-api/estuary/content?id=file-image-1&sig=one"
+            >
+            <img
+              alt=""
+              aria-hidden="true"
+              src="https://chatgpt.com/backend-api/estuary/content?id=file-image-1&sig=one"
+            >
+          </div>
+          <div class="relative shrink-0">
+            <button type="button">
+              <div class="group/imagegen-image">
+                <img
+                  width="1254"
+                  height="1254"
+                  alt="已生成图片"
+                  src="https://chatgpt.com/backend-api/estuary/content?id=file-image-1&sig=one"
+                >
+              </div>
+            </button>
+            <button type="button">
+              <div class="group/imagegen-image">
+                <img
+                  width="1254"
+                  height="1254"
+                  alt="已生成图片"
+                  src="https://chatgpt.com/backend-api/estuary/content?id=file-image-2&sig=two"
+                >
+              </div>
+            </button>
+            <button type="button">
+              <div class="group/imagegen-image">
+                <img
+                  width="1254"
+                  height="1254"
+                  alt="已生成图片"
+                  src="https://chatgpt.com/backend-api/estuary/content?id=file-image-3&sig=three"
+                >
+              </div>
+            </button>
+          </div>
+        </div>
+      </section>
+    `
+
+    const adapter = createChatGptAdapter()
+    const responses = adapter.getResponseContainers()
+
+    expect(responses).toHaveLength(1)
+    expect(adapter.readResponseImages?.(responses[0])).toEqual([
+      {
+        sourceUrl: 'https://chatgpt.com/backend-api/estuary/content?id=file-image-1&sig=one',
+        alt: '已生成图片',
+        width: 1254,
+        height: 1254,
+      },
+      {
+        sourceUrl: 'https://chatgpt.com/backend-api/estuary/content?id=file-image-2&sig=two',
+        alt: '已生成图片',
+        width: 1254,
+        height: 1254,
+      },
+      {
+        sourceUrl: 'https://chatgpt.com/backend-api/estuary/content?id=file-image-3&sig=three',
+        alt: '已生成图片',
+        width: 1254,
+        height: 1254,
+      },
+    ])
+  })
+
   it('treats ChatGPT streaming busy indicators as generating even without a visible stop button', () => {
     document.body.innerHTML = `
       <section data-turn="assistant" data-testid="conversation-turn-2">

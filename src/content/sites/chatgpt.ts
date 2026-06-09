@@ -261,12 +261,16 @@ function findPrimaryResponseInTurn(turn: Element): Element | null {
     turn.querySelector(CHATGPT_SELECTORS.response)
   if (textResponse) return textResponse
 
-  const imageResponse = turn.querySelector(CHATGPT_SELECTORS.imageResponse)
-  return imageResponse && isGeneratedImageResponse(imageResponse) ? imageResponse : null
+  const screenshotResponse = turn.querySelector(CHATGPT_SELECTORS.imageResponse)
+  return screenshotResponse && isReportableScreenshotResponse(screenshotResponse) ? screenshotResponse : null
 }
 
 function isGeneratedImageResponse(element: Element): boolean {
   return extractResponseImages(element).length > 0
+}
+
+function isReportableScreenshotResponse(element: Element): boolean {
+  return isGeneratedImageResponse(element) || Boolean(extractCleanText(element).trim())
 }
 
 function extractResponseImages(node: Node): ReplyImageSource[] {

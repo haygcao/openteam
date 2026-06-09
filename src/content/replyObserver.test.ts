@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from 'vitest'
 import type { RoleToBackgroundMessage } from '../group/runtimeProtocol'
 import { createReplyObserver } from './replyObserver'
 import type { RoleSession } from './roleSession'
+import { createChatGptAdapter } from './sites/chatgpt'
 import type { ChatSiteAdapter } from './sites/types'
 
 describe('createReplyObserver', () => {
@@ -234,6 +235,187 @@ describe('createReplyObserver', () => {
         width: 1024,
         height: 1024,
       }],
+    }))
+
+    vi.useRealTimers()
+  })
+
+  it('reports images added to a baseline container that was empty when the prompt was sent', async () => {
+    vi.useFakeTimers()
+    document.body.innerHTML = '<message-content id="image-reply"></message-content>'
+
+    const sentMessages: RoleToBackgroundMessage[] = []
+    const roleSession = createFakeRoleSession()
+    const observer = createReplyObserver({
+      siteAdapter: createFakeAdapter({
+        isGenerating: () => false,
+        readResponseImages: node => [...(node as Element).querySelectorAll<HTMLImageElement>('img')].map(image => ({
+          sourceUrl: image.src,
+          alt: image.alt,
+          width: image.width,
+          height: image.height,
+        })),
+      }),
+      roleSession,
+      log: createFakeLog(),
+      sendRuntimeMessage: async message => {
+        sentMessages.push(message)
+        return { ok: true } as never
+      },
+      reportRoleError: vi.fn(),
+    })
+
+    observer.capturePromptReplyBaseline('msg-image')
+    roleSession.startPrompt('msg-image', 'attempt-image')
+    document.querySelector('message-content')!.innerHTML = `
+      <img
+        alt="已生成图片"
+        width="1254"
+        height="1254"
+        src="https://chatgpt.com/backend-api/estuary/content?id=file-image-1"
+      >
+      <img
+        alt="已生成图片"
+        width="1254"
+        height="1254"
+        src="https://chatgpt.com/backend-api/estuary/content?id=file-image-2"
+      >
+    `
+    observer.startReplyPolling('msg-image', 'attempt-image')
+
+    await vi.advanceTimersByTimeAsync(8_000)
+
+    expect(sentMessages).toContainEqual(expect.objectContaining({
+      type: 'TEAM_ROLE_REPLY',
+      messageId: 'msg-image',
+      replyAttemptId: 'attempt-image',
+      content: '',
+      images: [
+        expect.objectContaining({ sourceUrl: 'https://chatgpt.com/backend-api/estuary/content?id=file-image-1' }),
+        expect.objectContaining({ sourceUrl: 'https://chatgpt.com/backend-api/estuary/content?id=file-image-2' }),
+      ],
+    }))
+
+    vi.useRealTimers()
+  })
+
+  it('reports a ChatGPT generated image turn through the mutation observer', async () => {
+    vi.useFakeTimers()
+    document.body.innerHTML = `
+      <section data-turn="assistant" data-testid="conversation-turn-1">
+        <div data-message-author-role="assistant" data-message-id="reply-1">旧回复</div>
+      </section>
+    `
+
+    const sentMessages: RoleToBackgroundMessage[] = []
+    const roleSession = createFakeRoleSession()
+    const observer = createReplyObserver({
+      siteAdapter: createChatGptAdapter({ href: 'https://chatgpt.com/c/conv-1' }),
+      roleSession,
+      log: createFakeLog(),
+      sendRuntimeMessage: async message => {
+        sentMessages.push(message)
+        return { ok: true } as never
+      },
+      reportRoleError: vi.fn(),
+    })
+
+    observer.startReplyReporting()
+    observer.capturePromptReplyBaseline('msg-chatgpt-image')
+    roleSession.startPrompt('msg-chatgpt-image', 'attempt-chatgpt-image')
+    document.body.insertAdjacentHTML('beforeend', `
+      <section data-turn="assistant" data-testid="conversation-turn-2">
+        <div data-conversation-screenshot-content>
+          <div class="group/imagegen-image">
+            <img
+              width="1254"
+              height="1254"
+              alt="已生成图片"
+              src="https://chatgpt.com/backend-api/estuary/content?id=file-image-1&sig=one"
+            >
+          </div>
+        </div>
+      </section>
+    `)
+    await Promise.resolve()
+
+    await vi.advanceTimersByTimeAsync(5_000)
+
+    expect(sentMessages).toContainEqual(expect.objectContaining({
+      type: 'TEAM_ROLE_REPLY',
+      messageId: 'msg-chatgpt-image',
+      replyAttemptId: 'attempt-chatgpt-image',
+      content: '',
+      images: [{
+        sourceUrl: 'https://chatgpt.com/backend-api/estuary/content?id=file-image-1&sig=one',
+        alt: '已生成图片',
+        width: 1254,
+        height: 1254,
+      }],
+    }))
+
+    vi.useRealTimers()
+  })
+
+  it('reports a new image prepended before a baseline image instead of treating it as old', async () => {
+    vi.useFakeTimers()
+    document.body.innerHTML = `
+      <section data-turn="assistant" data-testid="conversation-turn-old">
+        <div data-conversation-screenshot-content>
+          <div class="group/imagegen-image">
+            <img
+              alt="旧图片"
+              src="https://chatgpt.com/backend-api/estuary/content?id=file-old"
+            >
+          </div>
+        </div>
+      </section>
+    `
+
+    const sentMessages: RoleToBackgroundMessage[] = []
+    const roleSession = createFakeRoleSession()
+    const observer = createReplyObserver({
+      siteAdapter: createChatGptAdapter({ href: 'https://chatgpt.com/c/conv-1' }),
+      roleSession,
+      log: createFakeLog(),
+      sendRuntimeMessage: async message => {
+        sentMessages.push(message)
+        return { ok: true } as never
+      },
+      reportRoleError: vi.fn(),
+    })
+
+    observer.capturePromptReplyBaseline('msg-new-image')
+    roleSession.startPrompt('msg-new-image', 'attempt-new-image')
+    document.body.insertAdjacentHTML('afterbegin', `
+      <section data-turn="assistant" data-testid="conversation-turn-new">
+        <div data-conversation-screenshot-content>
+          <div class="group/imagegen-image">
+            <img
+              alt="新图片"
+              src="https://chatgpt.com/backend-api/estuary/content?id=file-new"
+            >
+          </div>
+        </div>
+      </section>
+    `)
+    observer.startReplyPolling('msg-new-image', 'attempt-new-image')
+
+    await vi.advanceTimersByTimeAsync(8_000)
+
+    expect(sentMessages).toContainEqual(expect.objectContaining({
+      type: 'TEAM_ROLE_REPLY',
+      messageId: 'msg-new-image',
+      images: [expect.objectContaining({
+        sourceUrl: 'https://chatgpt.com/backend-api/estuary/content?id=file-new',
+        alt: '新图片',
+      })],
+    }))
+    expect(sentMessages).not.toContainEqual(expect.objectContaining({
+      type: 'TEAM_ROLE_REPLY',
+      images: [expect.objectContaining({
+        sourceUrl: 'https://chatgpt.com/backend-api/estuary/content?id=file-old',
+      })],
     }))
 
     vi.useRealTimers()

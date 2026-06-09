@@ -36,6 +36,7 @@ export function createReplyObserver(options: {
 }): ReplyObserverController {
   const { siteAdapter, roleSession, log } = options
   let promptBaselineContainers = new Set<Element>()
+  let promptBaselineContainerKeys = new WeakMap<Element, string>()
   let promptBaselineReplies = new Set<string>()
   let promptBaselineContainerCount = 0
   let promptBaselinePromptId = ''
@@ -83,8 +84,13 @@ export function createReplyObserver(options: {
   function capturePromptReplyBaseline(messageId: string | undefined): void {
     const containers = siteAdapter.getResponseContainers()
     const replies = containers.map(container => siteAdapter.readResponseText(container)).filter(Boolean)
+    const snapshots = containers.map(element => readReplySnapshot(element)).filter(hasReplySnapshot)
     promptBaselineContainers = new Set(containers)
-    promptBaselineReplies = new Set(containers.map(element => readReplySnapshot(element)).filter(hasReplySnapshot).map(snapshot => snapshot.key))
+    promptBaselineContainerKeys = new WeakMap()
+    for (const snapshot of snapshots) {
+      promptBaselineContainerKeys.set(snapshot.element, snapshot.key)
+    }
+    promptBaselineReplies = new Set(snapshots.map(snapshot => snapshot.key))
     promptBaselineContainerCount = countResponseContainers(containers)
     promptBaselinePromptId = messageId ?? ''
     replyTracker.seed(getConversationId(), replies)
@@ -100,6 +106,7 @@ export function createReplyObserver(options: {
 
   function clearPromptReplyBaseline(): void {
     promptBaselineContainers.clear()
+    promptBaselineContainerKeys = new WeakMap()
     promptBaselineReplies.clear()
     promptBaselineContainerCount = 0
     promptBaselinePromptId = ''
@@ -115,15 +122,25 @@ export function createReplyObserver(options: {
   function isPromptBaselineReply(text: string, element: Element): boolean {
     const currentContainers = siteAdapter.getResponseContainers()
     const elementIndex = currentContainers.indexOf(element)
-    if (elementIndex >= 0 && currentContainers.length > promptBaselineContainerCount) return elementIndex < promptBaselineContainerCount
-
     const snapshot = readReplySnapshot(element, text)
     if (!hasReplySnapshot(snapshot)) return true
-    if (promptBaselineReplies.has(snapshot.key)) return true
 
+    let matchingBaselineContainer: Element | undefined
+    let matchingBaselineKey: string | undefined
     for (const container of promptBaselineContainers) {
-      if (container === element || container.contains(element)) return true
+      if (container === element || container.contains(element)) {
+        matchingBaselineContainer = container
+        matchingBaselineKey = promptBaselineContainerKeys.get(container)
+        break
+      }
     }
+
+    const sameBaselineElement = Boolean(matchingBaselineContainer && matchingBaselineKey === snapshot.key)
+    if (elementIndex >= 0 && currentContainers.length > promptBaselineContainerCount && elementIndex >= promptBaselineContainerCount && !sameBaselineElement) {
+      return false
+    }
+    if (promptBaselineReplies.has(snapshot.key)) return true
+    if (matchingBaselineContainer) return sameBaselineElement
 
     return false
   }
