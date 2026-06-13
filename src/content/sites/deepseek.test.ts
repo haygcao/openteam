@@ -45,18 +45,60 @@ describe('DeepSeek site adapter', () => {
         <div class="ec4f5d61">
           <div role="button" aria-disabled="false" class="ds-toggle-button">深度思考</div>
           <div class="bf38813a">
-            <div role="button" aria-disabled="false" class="ds-icon-button _52c986b" tabindex="0"></div>
+            <div role="button" class="ds-button ds-button--iconLabelPrimary ds-button--icon ds-button--capsule">
+              <div class="ds-button__icon">
+                <div class="ds-icon"></div>
+              </div>
+            </div>
+            <input type="file" />
+            <div>
+              <div role="button" class="ds-button ds-button--primary ds-button--filled ds-button--circle _52c986b" tabindex="0">
+                <div class="ds-button__icon">
+                  <svg viewBox="0 0 16 16"></svg>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
       </div>
     `
-    const sendButton = document.querySelector<HTMLElement>('.bf38813a [role="button"]')!
-    const clickListener = vi.fn()
-    sendButton.addEventListener('click', clickListener)
+    const buttons = [...document.querySelectorAll<HTMLElement>('.bf38813a [role="button"]')]
+    const attachListener = vi.fn()
+    const sendListener = vi.fn()
+    buttons[0]?.addEventListener('click', attachListener)
+    buttons[1]?.addEventListener('click', sendListener)
 
     await createDeepSeekAdapter({ inputTimeoutMs: 250 }).fillAndSend('hello', true)
 
-    expect(clickListener).toHaveBeenCalledTimes(1)
+    expect(attachListener).not.toHaveBeenCalled()
+    expect(sendListener).toHaveBeenCalledTimes(1)
+  })
+
+  it('clicks the DeepSeek send icon when hashed composer classes change', async () => {
+    document.body.innerHTML = `
+      <div class="new-composer-shell">
+        <textarea name="search" placeholder="给 DeepSeek 发送消息 "></textarea>
+        <div class="new-composer-actions">
+          <div role="button" aria-label="上传附件" class="ds-icon-button new-attach-button" tabindex="0">
+            <div class="ds-icon"></div>
+          </div>
+          <div role="button" aria-disabled="false" class="ds-icon-button new-send-button" tabindex="0">
+            <div class="ds-icon"></div>
+          </div>
+        </div>
+      </div>
+    `
+    const attachButton = document.querySelector<HTMLElement>('.new-attach-button')!
+    const sendButton = document.querySelector<HTMLElement>('.new-send-button')!
+    const attachListener = vi.fn()
+    const sendListener = vi.fn()
+    attachButton.addEventListener('click', attachListener)
+    sendButton.addEventListener('click', sendListener)
+
+    await createDeepSeekAdapter({ inputTimeoutMs: 50 }).fillAndSend('hello', true)
+
+    expect(attachListener).not.toHaveBeenCalled()
+    expect(sendListener).toHaveBeenCalledTimes(1)
   })
 
   it('reads only final assistant markdown replies and skips thinking content', () => {

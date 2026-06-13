@@ -14,7 +14,8 @@ const DEEPSEEK_SELECTORS = {
   response: '[data-virtual-list-item-key] .ds-message .ds-markdown:not(.ds-think-content .ds-markdown)',
   responseContainer: '[data-virtual-list-item-key]',
   composer: '.aaff8b8f, ._77cefa5, [class*="composer"]',
-  sendButton: '.bf38813a [role="button"], .bf38813a button, [role="button"]._52c986b, button._52c986b',
+  sendButton:
+    '.bf38813a [role="button"], .bf38813a button, [role="button"]._52c986b, button._52c986b, [role="button"].ds-icon-button, button.ds-icon-button, [role="button"].ds-button--primary.ds-button--filled.ds-button--circle, button.ds-button--primary.ds-button--filled.ds-button--circle',
 }
 
 const SKIP_TAGS = new Set(['SCRIPT', 'STYLE', 'BUTTON', 'TEXTAREA', 'SVG'])
@@ -135,7 +136,14 @@ function isDeepSeekSendButton(element: HTMLElement): boolean {
   if (element.getAttribute('aria-disabled') === 'true') return false
   if (element instanceof HTMLButtonElement && element.disabled) return false
   if (element.classList.contains('ds-toggle-button')) return false
-  if (!element.classList.contains('ds-icon-button') && !element.querySelector('.ds-icon')) return false
+  if (buttonLabelMatches(element, /attach|upload|file|camera|image|voice|microphone|附件|上传|图片|语音/)) return false
+  if (
+    !element.classList.contains('_52c986b') &&
+    !element.classList.contains('ds-icon-button') &&
+    !(element.classList.contains('ds-button--primary') &&
+      element.classList.contains('ds-button--filled') &&
+      element.classList.contains('ds-button--circle'))
+  ) return false
   return isVisibleInteractiveElement(element)
 }
 
