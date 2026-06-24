@@ -3,7 +3,7 @@ import { normalizeMessageHighlightColor } from '../group/highlightColors'
 import { defaultMentionTargetForMessage, parseGroupMentions, roleMentionLabelOptionsFromSettings } from '../group/mentionParser'
 import { mapRuntimeRoleStatus } from '../group/runtimeProtocol'
 import type { BackgroundToRoleMessage } from '../group/runtimeProtocol'
-import type { ExternalModelConfig, GroupChat, GroupMessage, GroupRole, MessageImageAttachment, MessageReference, OpenTeamStore, ReplyImageSource, RuntimeFrameBinding } from '../group/types'
+import type { ChatSite, ExternalModelConfig, GroupChat, GroupMessage, GroupRole, MessageImageAttachment, MessageReference, OpenTeamStore, OrchestrationFlow, ReplyImageSource, RoleSiteHealthStatus, RuntimeFrameBinding } from '../group/types'
 import { createExternalModelClient, type ExternalModelClient } from './externalModelClient'
 import type { BackgroundMessageRoute } from './messageRouter'
 import type { PromptDelivery, PromptSender } from './promptDelivery'
@@ -13,7 +13,7 @@ import { messageTabId, rememberHost, senderFrameId, senderTabId, type RuntimeMes
 import type { RuntimeFrameRegistry } from './runtimeFrames'
 import type { SitePromptDeliveryLimiter } from './sitePromptDeliveryLimiter'
 import { getChatMessages, getChatRoles, mutateStore, requireChat, requireRole } from './storeAccess'
-import { markOrchestrationRoleError, maybeAdvanceOrchestrationRun } from './orchestrationRuntime'
+import { markOrchestrationRoleError, maybeAdvanceOrchestrationRun, startOrchestrationRun } from './orchestrationRuntime'
 
 const STALE_THINKING_MS = 120_000
 const DEFAULT_EXTERNAL_MODEL_RETRY_DELAYS_MS = [2_000, 2_000, 4_000, 8_000, 15_000] as const
@@ -36,6 +36,7 @@ export const MESSAGE_ROUTE_TYPES = [
   'TEAM_ROLE_CONVERSATION_UPDATED',
   'TEAM_SEND_ACK',
   'TEAM_ROLE_STATUS',
+  'TEAM_SITE_STATUS_UPDATE',
   'TEAM_ROLE_REPLY',
   'TEAM_ROLE_REPLY_RESYNC',
   'TEAM_ROLE_ERROR',
@@ -85,6 +86,19 @@ export function createMessageHandlers(deps: MessageHandlersDependencies): Backgr
       const roles = getChatRoles(store, chat)
       const parsed = parseGroupMentions(raw, roles, { ...roleMentionLabelOptionsFromSettings(store.settings), defaultTarget: defaultMentionTargetForMessage(raw, chat) })
       if (!parsed.ok) throw new Error(parsed.error)
+
+      if (parsed.orchestrationTarget) {
+        const flow = resolveOrchestrationMentionFlow(store, chat, parsed.orchestrationTarget)
+        return {
+          orchestration: {
+            chatId: chat.id,
+            flowId: flow.id,
+            task: parsed.content,
+            maxRounds: flow.maxRounds,
+            maxNodeExecutions: flow.maxNodeExecutions,
+          },
+        }
+      }
 
       let finalTargetRoleIds = parsed.targetRoleIds
       const hasManualRoute = parsed.mentionedRoleIds.length > 0 || Boolean(parsed.mentionsAll) || Boolean(parsed.orchestrationTarget)
@@ -194,28 +208,35 @@ export function createMessageHandlers(deps: MessageHandlersDependencies): Backgr
       return { message: userMessage, deliveries, externalDeliveries }
     })
 
+    const orchestration = 'orchestration' in result ? result.orchestration : undefined
+    if (orchestration) {
+      deps.log.info('message-send:orchestration-start', { chatId, flowId: orchestration.flowId, taskLength: orchestration.task.length })
+      return { ok: true, ...(await startOrchestrationRun(deps, orchestration)) }
+    }
+    const messageResult = result as { message: GroupMessage; deliveries: PromptDelivery[]; externalDeliveries: ExternalPromptDelivery[] }
+
     deps.log.info('message-send:deliveries-ready', {
       chatId,
-      messageId: result.message.id,
+      messageId: messageResult.message.id,
       deliveries: [
-        ...result.deliveries.map(delivery => ({ roleId: delivery.roleId, modelSource: 'site', chatSite: delivery.chatSite, tabId: delivery.tabId, frameId: delivery.frameId, contentLength: delivery.message.content.length })),
-        ...result.externalDeliveries.map(delivery => ({ roleId: delivery.roleId, modelSource: 'external', modelId: delivery.model.id, contentLength: delivery.prompt.length })),
+        ...messageResult.deliveries.map(delivery => ({ roleId: delivery.roleId, modelSource: 'site', chatSite: delivery.chatSite, tabId: delivery.tabId, frameId: delivery.frameId, contentLength: delivery.message.content.length })),
+        ...messageResult.externalDeliveries.map(delivery => ({ roleId: delivery.roleId, modelSource: 'external', modelId: delivery.model.id, contentLength: delivery.prompt.length })),
       ],
     })
     await deps.broadcastStoreUpdated(store)
 
-    await sendPromptDeliveries(deps, chatId, result.message.id, result.deliveries)
+    await sendPromptDeliveries(deps, chatId, messageResult.message.id, messageResult.deliveries)
     let responseStore = store
-    for (const delivery of result.externalDeliveries) {
+    for (const delivery of messageResult.externalDeliveries) {
       responseStore = await sendExternalModelDelivery(deps, externalModelClient, externalModelRuns, delivery) ?? responseStore
     }
 
     return {
       ok: true,
-      message: result.message,
+      message: messageResult.message,
       deliveries: [
-        ...result.deliveries.map(delivery => ({ roleId: delivery.roleId, modelSource: 'site' })),
-        ...result.externalDeliveries.map(delivery => ({ roleId: delivery.roleId, modelSource: 'external' })),
+        ...messageResult.deliveries.map(delivery => ({ roleId: delivery.roleId, modelSource: 'site' })),
+        ...messageResult.externalDeliveries.map(delivery => ({ roleId: delivery.roleId, modelSource: 'external' })),
       ],
       store: responseStore,
     }
@@ -304,14 +325,25 @@ export function createMessageHandlers(deps: MessageHandlersDependencies): Backgr
     } else {
       const binding = deps.runtimeFrames.getByRole(chatId, roleId)
       if (!binding?.ready) throw new Error('人员 iframe 尚未就绪，无法停止回复')
-      const response = await deps.sendRoleMessage(binding.tabId, binding.frameId, {
-        type: 'TEAM_STOP_GENERATION',
-        chatId,
-        roleId,
-        messageId: active.messageId,
-        replyAttemptId: active.replyAttemptId,
-      })
-      if (isRecord(response) && response.ok === false) throw new Error(readOptionalString(response.error) ?? '停止回复失败')
+      try {
+        const response = await deps.sendRoleMessage(binding.tabId, binding.frameId, {
+          type: 'TEAM_STOP_GENERATION',
+          chatId,
+          roleId,
+          messageId: active.messageId,
+          replyAttemptId: active.replyAttemptId,
+        })
+        if (isRecord(response) && response.ok === false) throw new Error(readOptionalString(response.error) ?? '停止回复失败')
+      } catch (error) {
+        if (!isReceiverDisconnectedError(error)) throw error
+        deps.log.warn('role-stop-reply:receiver-disconnected', {
+          chatId,
+          roleId,
+          messageId: active.messageId,
+          replyAttemptId: active.replyAttemptId,
+          error: error instanceof Error ? error.message : String(error),
+        })
+      }
     }
 
     const timestamp = deps.now()
@@ -541,12 +573,51 @@ export function createMessageHandlers(deps: MessageHandlersDependencies): Backgr
     return { ok: true, role: result, store }
   }
 
+  const handleSiteStatusUpdate = async (message: RuntimeMessage, sender: chrome.runtime.MessageSender) => {
+    const siteId = readSiteId(message.siteId)
+    const status = readSiteHealthStatus(message.status)
+    if (!siteId || !status) return { ok: false, error: '未知页面健康状态' }
+
+    const identity = readIdentityOptional(deps, message, sender)
+    if (!identity) {
+      deps.log.warn('site-status:missing-identity', {
+        siteId,
+        status,
+        detail: readOptionalString(message.detail),
+        senderUrl: sender.url,
+        tabId: messageTabId(message, sender),
+        frameId: senderFrameId(sender),
+      })
+      return { ok: false, error: '缺少 chatId/roleId，已忽略页面健康状态' }
+    }
+
+    const timestamp = deps.now()
+    const detail = readOptionalString(message.detail)
+    deps.log.info('site-status:received', { ...identity, siteId, status, detail, senderUrl: sender.url })
+    const { store, result } = await mutateStore(store => {
+      const chat = requireChat(store, identity.chatId)
+      const role = requireRole(store, chat.id, identity.roleId)
+      role.siteHealth = {
+        siteId,
+        status,
+        ...(detail ? { detail } : {}),
+        updatedAt: timestamp,
+      }
+      role.updatedAt = timestamp
+      chat.updatedAt = timestamp
+      return role
+    })
+
+    await deps.broadcastStoreUpdated(store)
+    return { ok: true, role: result, store }
+  }
+
   const handleRoleReply = async (message: RuntimeMessage, sender: chrome.runtime.MessageSender) => {
     const identity = readIdentity(deps, message, sender)
     const content = readReplyContent(message.content)
     const images = readReplyImageSources(message.images)
     if (!content && images.length === 0) throw new Error('回复内容不能为空')
-    if (images.length > 0 && !isBoundChatGptSender(deps, identity, message, sender)) throw new Error('图片回复只能来自已绑定的 ChatGPT 页面')
+    if (images.length > 0 && !isBoundImageSender(deps, identity, message, sender)) throw new Error('图片回复只能来自已绑定的 ChatGPT 或 Gemini 页面')
     const contentFormat = message.contentFormat === 'markdown' ? 'markdown' : undefined
     const promptMessageId = readOptionalString(message.messageId)
     const replyAttemptId = readOptionalString(message.replyAttemptId)
@@ -631,7 +702,7 @@ export function createMessageHandlers(deps: MessageHandlersDependencies): Backgr
     const content = readReplyContent(message.content)
     const images = readReplyImageSources(message.images)
     if (!content && images.length === 0) throw new Error('回复内容不能为空')
-    if (images.length > 0 && !isBoundChatGptSender(deps, identity, message, sender)) throw new Error('图片回复只能来自已绑定的 ChatGPT 页面')
+    if (images.length > 0 && !isBoundImageSender(deps, identity, message, sender)) throw new Error('图片回复只能来自已绑定的 ChatGPT 或 Gemini 页面')
     const contentFormat = message.contentFormat === 'markdown' ? 'markdown' : undefined
     const timestamp = deps.now()
     const attachments = images.length > 0
@@ -742,6 +813,7 @@ export function createMessageHandlers(deps: MessageHandlersDependencies): Backgr
     { type: 'TEAM_ROLE_CONVERSATION_UPDATED', handler: handleConversationUpdated },
     { type: 'TEAM_SEND_ACK', handler: handleSendAck },
     { type: 'TEAM_ROLE_STATUS', handler: handleRoleStatus },
+    { type: 'TEAM_SITE_STATUS_UPDATE', handler: handleSiteStatusUpdate },
     { type: 'TEAM_ROLE_REPLY', handler: handleRoleReply },
     { type: 'TEAM_ROLE_REPLY_RESYNC', handler: handleRoleReplyResync },
     { type: 'TEAM_ROLE_ERROR', handler: handleRoleError },
@@ -1252,6 +1324,11 @@ function isAbortError(error: unknown): boolean {
   return error instanceof DOMException && error.name === 'AbortError'
 }
 
+function isReceiverDisconnectedError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error)
+  return message.includes('Could not establish connection') || message.includes('Receiving end does not exist')
+}
+
 function finalizeActiveExternalAssistantReply(store: OpenTeamStore, chat: GroupChat, role: GroupRole, promptMessageId: string): boolean {
   const reply = findPendingAssistantAfterPrompt(store, chat, role, promptMessageId)
   if (!reply) return false
@@ -1551,6 +1628,30 @@ function readOptionalString(value: unknown): string | undefined {
   return typeof value === 'string' ? value.trim() || undefined : undefined
 }
 
+function resolveOrchestrationMentionFlow(
+  store: OpenTeamStore,
+  chat: GroupChat,
+  target: 'default' | { name: string },
+): OrchestrationFlow {
+  const orderedFlows = (store.orchestrationFlowOrderByChatId[chat.id] ?? [])
+    .map(flowId => store.orchestrationFlowsById[flowId])
+    .filter((flow): flow is OrchestrationFlow => Boolean(flow && flow.chatId === chat.id))
+  const extraFlows = Object.values(store.orchestrationFlowsById)
+    .filter((flow): flow is OrchestrationFlow => Boolean(flow && flow.chatId === chat.id && !orderedFlows.some(ordered => ordered.id === flow.id)))
+  const flows = [...orderedFlows, ...extraFlows]
+
+  if (target === 'default') {
+    const flow = flows[0]
+    if (!flow) throw new Error('当前群聊还没有编排流程，请先创建或保存一个编排流程')
+    return flow
+  }
+
+  const name = target.name.trim()
+  const flow = flows.find(candidate => candidate.name.trim() === name)
+  if (!flow) throw new Error(`找不到名为“${name}”的编排流程，请先创建或保存`)
+  return flow
+}
+
 function readReplyContent(value: unknown): string {
   return typeof value === 'string' ? value.trim() : ''
 }
@@ -1574,23 +1675,37 @@ function readOptionalImageDimension(value: unknown): number | undefined {
   return typeof value === 'number' && Number.isInteger(value) && value > 0 && value <= 20_000 ? value : undefined
 }
 
-function isChatGptSenderUrl(value: string | undefined): boolean {
+function readSiteId(value: unknown): ChatSite | undefined {
+  if (value === 'gemini' || value === 'chatgpt' || value === 'claude' || value === 'deepseek' || value === 'grok') return value
+  return undefined
+}
+
+function readSiteHealthStatus(value: unknown): RoleSiteHealthStatus | undefined {
+  if (value === 'ready' || value === 'generating' || value === 'error' || value === 'blocked' || value === 'unauthorized') return value
+  return undefined
+}
+
+function isTrustedImageSenderUrl(value: string | undefined): boolean {
   if (!value) return false
   try {
     const url = new URL(value)
-    return url.protocol === 'https:' && (url.hostname === 'chatgpt.com' || url.hostname === 'chat.openai.com')
+    return url.protocol === 'https:' && (
+      url.hostname === 'chatgpt.com' ||
+      url.hostname === 'chat.openai.com' ||
+      url.hostname === 'gemini.google.com'
+    )
   } catch {
     return false
   }
 }
 
-function isBoundChatGptSender(
+function isBoundImageSender(
   deps: MessageHandlersDependencies,
   identity: { chatId: string; roleId: string },
   message: RuntimeMessage,
   sender: chrome.runtime.MessageSender,
 ): boolean {
-  if (!isChatGptSenderUrl(sender.url)) return false
+  if (!isTrustedImageSenderUrl(sender.url)) return false
   const tabId = messageTabId(message, sender)
   if (tabId === undefined) return false
   const binding = deps.runtimeFrames.getByAddress(tabId, senderFrameId(sender))
